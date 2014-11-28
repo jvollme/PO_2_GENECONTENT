@@ -13,13 +13,15 @@ myparser.add_argument("-ofas", "--out_fasta", action="store_true", dest="outfast
 myparser.add_argument("-omat", "--out_matrix", action="store_true", dest="outmatrix", help="Create a file with the aligned discrete character data in tabular format (in addition to the default phylip file)")
 myparser.add_argument("-t", "--threads", action="store", dest="nthreads", type=int, default=4, help="Number of cpus to use\nDefault=4 (or maximum number of available cores, if less than 4 cores available)")
 myparser.add_argument("-sd", "--seed", action="store", dest="seed_nr", type=int, default=0, help="Integer to provide as seed for RAxML or PhyML\n0=seed generated randomly\nDefault=random seed")
-myparser.add_argument("--raxml", action="store_true", dest="raxml", default=False, help="Generate ML phylogenetic tree without bootstrap values using RAxML and \"new rapid hill climbing\" and substitution model: \"BINGAMMA\"\nDefault=don't use")
-myparser.add_argument("--raxml_bs", action="store_true", dest="raxml_BS", default=False, help="Generate ML phylogenetic tree with thorough bootstrap analyses and search for best ML tree using RAxML and \"new rapid hill climbing\" and substitution model: \"BINGAMMA\"'\nDefault: don't use")
-myparser.add_argument("--raxml_rapidbs", action="store_true", dest="raxml_rapidBS", default=False, help="Generate ML phylogenetic tree with rapid bootstrap analyses and search for best ML tree in one run using RAxML and substitution model: \"BINGAMMA\"\nDefault: don't use")
-myparser.add_argument("--pars", action="store_true", dest="fpars", default=False, help="Generate Parsimony phylogenetic tree using fpars (the EMBOSS implementation of the PHYLIP tool)\nDefault: don't use")
-myparser.add_argument("--mix", action="store_true", dest="fmix", default=False, help="Generate Parsimony phylogenetic tree using fmix with wagner parsimony (the EMBOSS implementation of the PHYLIP tool)\nDefault=don't use")
-myparser.add_argument("--dollop", action="store_true", dest="fdollop", default=False, help="Generate Parsimony phyogenetic trees using fdollop and Dollo Parsimony (the EMBOSS implementation of the PHYLIP tool)\n Default=don't use")
-myparser.add_argument("-bs", "--bootstraps", action="store", dest="bootstraps", type=int, default=1000, help="Number of times to resample for bootstrapping\nonly makes sense in combination with '--raxml_bs' or '--raxml_rapidbs'\nDefault=1000")
+myparser.add_argument("-mt", "--make_tree", action="store", dest="tree_method", choices=["raxml", "raxml_bs", "raxml_rapidbs", "none"], default="none", help="Generate ML phylogenetic trees using RAxML with \"new rapid hill climbing\" and substitution model: \"BINGAMMA\"\n\tchoices:\t\"raxml\": single tree without bootstraps (using new rapid hill climbing)\n\t\traxml_bs: thorough bootstrap analyses and search for best ML tree\n\t\traxml_rapidbs: rapid bootstrap analyses and search for best ML tree in one run\n\t\tnone\nDefault=none")
+myparser.add_argument("-tbp","--tree_builder_path", action="store", dest="treebuilder_path", default="", help="Path to treebuilder (currently only raxml supported) if not listed in $PATH")
+#myparser.add_argument("--raxml", action="store_true", dest="raxml", default=False, help="Generate ML phylogenetic tree without bootstrap values using RAxML and \"new rapid hill climbing\" and substitution model: \"BINGAMMA\"\nDefault=don't use")
+#myparser.add_argument("--raxml_bs", action="store_true", dest="raxml_BS", default=False, help="Generate ML phylogenetic tree with thorough bootstrap analyses and search for best ML tree using RAxML and \"new rapid hill climbing\" and substitution model: \"BINGAMMA\"'\nDefault: don't use")
+#myparser.add_argument("--raxml_rapidbs", action="store_true", dest="raxml_rapidBS", default=False, help="Generate ML phylogenetic tree with rapid bootstrap analyses and search for best ML tree in one run using RAxML and substitution model: \"BINGAMMA\"\nDefault: don't use")
+#myparser.add_argument("--pars", action="store_true", dest="fpars", default=False, help="Generate Parsimony phylogenetic tree using fpars (the EMBOSS implementation of the PHYLIP tool)\nDefault: don't use")
+#myparser.add_argument("--mix", action="store_true", dest="fmix", default=False, help="Generate Parsimony phylogenetic tree using fmix with wagner parsimony (the EMBOSS implementation of the PHYLIP tool)\nDefault=don't use")
+#myparser.add_argument("--dollop", action="store_true", dest="fdollop", default=False, help="Generate Parsimony phyogenetic trees using fdollop and Dollo Parsimony (the EMBOSS implementation of the PHYLIP tool)\n Default=don't use")
+myparser.add_argument("-bs", "--bootstraps", action="store", dest="bootstraps", type=int, default=1000, help="Number of times to resample for bootstrapping\nonly makes sense in combination with '-mt raxml_bs' or '-mt raxml_rapidbs'\nDefault=1000")
 #implement bootsrapped versions of pars, mix and dollop soon
 args=myparser.parse_args()
 
@@ -29,7 +31,8 @@ available_cores=multiprocessing.cpu_count() #counts how many cores are available
 wstrings, estrings, lstrings=[], [], [] #warning, error and log messages respectively
 out_file, PO_file=args.out_file+"_"+time.strftime("%Y%m%d%H%M%S"), args.po_resultfile
 nthreads, seed, bootstraps=args.nthreads, args.seed_nr, args.bootstraps
-
+tree_method, treebuilder_path = args.tree_method, args.treebuilder_path
+raxml_prog="raxmlHPC"
 logfilename=out_file+"_PO_2_GENECONTENT_"+time.strftime("%Y%m%d%H%M%S")+".log"
 verbose=True
 docontinue=True
@@ -41,7 +44,7 @@ def randomnumber():
     return random.randint(1,2000)
 
 def checkargs(args):
-	global verbose, nthreads, seed, bootstraps
+	global verbose, nthreads, seed, bootstraps, tree_method, raxml_prog
 	global nthreads
 	if args.no_verbose:
 		verbose=False
@@ -56,21 +59,51 @@ def checkargs(args):
 		datsAlogmessage("Setting seed randomly to "+str(seed))
 	else:
 		datsAlogmessage("Using "+str(seed)+" as seed")
-	if args.raxml or args.raxml_BS or args.raxml_rapidBS:
-		if which("raxmlHPC")==None:
-			datsANerror("ERROR: raxmlHPC not found in any directory within $PATH")
-		else:
+	if tree_method != "none":
+		if treebuilder_path=="":
+			if which("raxmlHPC")==None and which("raxmlHPC-PTHREADS")==None and which("raxmlHPC-PTHREADS-SSE3")==None and which("raxmlHPC-SSE3")==None:
+				datsANerror("ERROR: No raxmlHPC binaries found in any directory within $PATH! please provide a PATH to raxml binaries!")
+				tree_method="none"
+			else:
+				if which("raxmlHPC-PTHREADS-SSE3")!=None:
+					raxml_prog=which("raxmlHPC-PTHREADS-SSE3")
+					datsAlogmessage("found "+raxml_prog+ "! will use this tool") 
+				elif which("raxmlHPC-PTHREADS")!=None:
+					raxml_prog=which("raxmlHPC-PTHREADS")
+					datsAlogmessage("found "+raxml_prog+ "! will use this tool")
+				else:
+					datsAwarning("Warning: multithreading is only supported with 'PTHREADS'-versions of raxml. Not sure if your raxml binaries support this.\t\nif raxml calculations fail, recombile raxml with 'PTHREADS'-option")
+					if which("raxmlHPC-SSE3")!=None:
+						raxml_prog=which("raxmlHPC-SSE3")
+						datsAlogmessage("found "+raxml_prog+ "! will use this tool")
+					else:
+						raxml_prog=which("raxmlHPC")
+						datsAlogmessage("found "+raxml_prog+ "! will use this tool")
+				try:
+					checkraxml_cline=RaxmlCommandline(raxml_prog, version=True)
+					versiontext=checkraxml_cline()[0]
+					startv=versiontext.find("version ")+len("version ")
+					endv=versiontext[startv:].find(" ")
+					version=versiontext[startv:startv+endv].split(".")
+					if int(version[0])<8 or (int(version[0])==8 and int(version[1])==0 and int(version[2])<20):
+						datsAwarning("Warning: This script was devised for and tested with RAxML v8.0.20. Your version is v"+".".join(version)+" !\n\tThis may very well still work, but if it doesn't it's YOUR fault!")
+				except:
+					datsAwarning("Warning: This script was devised for and tested with RAxML v8.0.20.\n\tNot sure which version of RAxML you're using, but it sure as hell isn't v7 or v8!\n\tThis may very well still work, but if it doesn't it's YOUR fault!")
+		elif os.path.exists(treebuilder_path) and os.path.isfile(treebuilder_path):
+			if nthreads>1 and not "PTHREADS" in treebuilder_path:
+				datsAwarning("Warning: multithreading is only supported with 'PTHREADS'-versions of raxml. Not sure if your choosen binaries support this.\t\nif raxml calculations fail, recombile raxml with 'PTHREADS'-option") 
 			try:
 				checkraxml_cline=RaxmlCommandline(version=True)
 				versiontext=checkraxml_cline()[0]
 				startv=versiontext.find("version ")+len("version ")
 				endv=versiontext[startv:].find(" ")
 				version=versiontext[startv:startv+endv].split(".")
-				if int(version[0])<7 or (int(version[0])==7 and int(version[1])<3) or (int(version[0])==7 and int(version[1])==3 and int(version[2])<5):
-					datsAwarning("Warning: This script was devised for and tested with RAxML v7.3.5. Your version is v"+".".join(version)+" !\n\tThis may very well still work, but if it doesn't it's YOUR fault!")
+				if int(version[0])<8 or (int(version[0])==8 and int(version[1])==0 and int(version[2])<20):
+						datsAwarning("Warning: This script was devised for and tested with RAxML v8.0.20. Your version is v"+".".join(version)+" !\n\tThis may very well still work, but if it doesn't it's YOUR fault!")
+				raxml_prog=treebuilder_path
 			except:
-				datsAwarning("Warning: This script was devised for and tested with RAxML v7.3.5.\n\tNot sure which version of RAxML you're using, but it sure as hell isn't v7.3.5!\n\tThis may very well still work, but if it doesn't it's YOUR fault!")	
-	#Add checks for dollop, mix and pars later
+				datsAwarning("Warning: Correct raxML-version not found under "+treebuilder_path+"!\nWill NOT calculate ML trees!")
+				tree_method="none" 	#Add checks for dollop, mix and pars later
 	#as soon as bootstrapping works with those tools, also add check for numpy v>7
 	
 def which(file):
@@ -192,8 +225,8 @@ def call_raxml_rapidbs(alignmentfile, outputfilename, seed, parameters): #parame
 	
 	datsAlogmessage("Calculating phylogenies: 'rapid bootstrap analyses and search for best-scoring ML Tree in one run' using raxmlHPC")
 	try:
-		outname="rapidBS_"+time.strftime("%Y%m%d%H%M%S")+"_"+"final_tree"	
-		raxml_cline=RaxmlCommandline(sequences=alignmentfile, algorithm="a", model="BINGAMMA", name=outname, parsimony_seed=seed, rapid_bootstrap_seed=seed, num_replicates=bootstraps, threads=nr_threads) 
+		outname="GENECONTENT_rapidBS"+str(bootstraps)+"_"+time.strftime("%Y%m%d%H%M%S")+"_"+"final_tree"	
+		raxml_cline=RaxmlCommandline(raxml_prog, sequences=alignmentfile, algorithm="a", model="BINGAMMA", name=outname, parsimony_seed=seed, rapid_bootstrap_seed=seed, num_replicates=bootstraps, threads=nr_threads) 
 		datsAlogmessage("-->"+str(raxml_cline))
 		raxml_cline()
 		datsAlogmessage("-->SUCCESS")
@@ -220,7 +253,7 @@ def call_raxml_bs(alignmentfile, outputfilename, seed, parameters):
 		
 	datsAlogmessage("\tDetermining best ML tree of 20 raxmlHPC runs") 
 	try:
-		raxml_cline=RaxmlCommandline(model="BINGAMMA", name="best_delme_tempfile", parsimony_seed=seed, num_replicates=20, sequences=alignmentfile, threads=nr_threads) 
+		raxml_cline=RaxmlCommandline(raxml_prog, model="BINGAMMA", name="best_delme_tempfile", parsimony_seed=seed, num_replicates=20, sequences=alignmentfile, threads=nr_threads) 
 		datsAlogmessage("\t-->"+str(raxml_cline))
 		raxml_cline()
 		#the resultfile will be :"RAxML_bestTree.best_delme_tempfile"
@@ -232,7 +265,7 @@ def call_raxml_bs(alignmentfile, outputfilename, seed, parameters):
 	
 	datsAlogmessage("\tDoing bootstrap analyses with "+str(bootstraps)+" runs using raxmlHPC")
 	try:
-		raxml_cline=RaxmlCommandline(model="BINGAMMA", sequences=alignmentfile, name="boot_delme_tempfile", parsimony_seed=seed, bootstrap_seed=seed, num_replicates=bootstraps, threads=nr_threads)
+		raxml_cline=RaxmlCommandline(raxml_prog, model="BINGAMMA", sequences=alignmentfile, name="boot_delme_tempfile", parsimony_seed=seed, bootstrap_seed=seed, num_replicates=bootstraps, threads=nr_threads)
 		datsAlogmessage("\t-->"+str(raxml_cline))
 		raxml_cline()
 		#the resultfile will be: "RAxML_bootstrap.boot_delme_tempfile"
@@ -244,8 +277,8 @@ def call_raxml_bs(alignmentfile, outputfilename, seed, parameters):
 		
 	datsAlogmessage("\tDrawing bipartitions of bootstrap trees onto best ML tree using raxmlHPC")
 	try:
-		outname="BS"+str(bootstraps)+"_"+time.strftime("%Y%m%d%H%M%S")+"_"+"final_tree"
-		raxml_cline=RaxmlCommandline(model="BINGAMMA", parsimony_seed=seed, algorithm="b", starting_tree="RAxML_bestTree.best_delme_tempfile", bipartition_filename="RAxML_bootstrap.boot_delme_tempfile", name=outname)
+		outname="GENECONTENT_BS"+str(bootstraps)+"_"+time.strftime("%Y%m%d%H%M%S")+"_"+"final_tree"
+		raxml_cline=RaxmlCommandline(raxml_prog, model="BINGAMMA", parsimony_seed=seed, algorithm="b", starting_tree="RAxML_bestTree.best_delme_tempfile", bipartition_filename="RAxML_bootstrap.boot_delme_tempfile", name=outname)
 		datsAlogmessage("\t-->"+str(raxml_cline))
 		raxml_cline()
 		#The resultfiles will be: RAxML_bipartitions.final_tree" and "RAxML_bipartitionsBranchLabels.final_tree"
@@ -262,9 +295,9 @@ def call_raxml_nobs(alignmentfile, outputfilename, seed, parameters):
 	if "-T" in parameters:
 		nr_threads=parameters["-T"]
 	try:
-		outname="raxml_"+time.strftime("%Y%m%d%H%M%S")+"_"+"final_tree"
+		outname="GENECONTENT_raxml_"+time.strftime("%Y%m%d%H%M%S")+"_"+"final_tree"
 		datsAlogmessage("Calculating phylogeny: Determining best ML tree of 20 raxmlHPC runs")
-		raxml_cline=RaxmlCommandline(sequences=alignmentfile, model="BINGAMMA", name=outname,  parsimony_seed=seed, num_replicates=20, threads=nr_threads)
+		raxml_cline=RaxmlCommandline(raxml_prog, sequences=alignmentfile, model="BINGAMMA", name=outname,  parsimony_seed=seed, num_replicates=20, threads=nr_threads)
 		datsAlogmessage("\t-->"+str(raxml_cline))
 		raxml_cline()
 		#the resultfile will be :"RAxML_bestTree.final_tree"
@@ -405,22 +438,22 @@ def main():
 				alignment_files.append(write_binary_matrix(out_file, columns))
 			if docontinue:
 				alignment_files.append(write_binaryalignment_phylip(out_file, columns))
-			if args.raxml_rapidBS and docontinue:
+			if tree_method=="raxml_rapidbs" and docontinue:
 				tree_files.extend(call_raxml_rapidbs(alignment_files[-1], out_file, seed, {"-N":bootstraps, "-T":nthreads}))
-			if args.raxml_BS and docontinue:
+			elif tree_method=="raxml_bs" and docontinue:
 				tree_files.extend(call_raxml_bs(alignment_files[-1], out_file, seed, {"-N":bootstraps, "-T":nthreads}))
-			if args.raxml and docontinue:
+			elif tree_method=="raxml" and docontinue:
 				print "number of alignmentfiles: "+str(len(alignment_files))
 				tree_files.extend(call_raxml_nobs(alignment_files[-1], out_file, seed, {"-T":nthreads}))
-			if args.fpars or args.fmix or args.fdollop and docontinue:
-				alignment_files.append(relaxed_2_strict_phylip(alignment_files[-1], alignment_files[-1].replace(".relaxed.", ".strict.")))
-				if alignment_files[-1]!=None:
-					if args.fpars:
-						treefiles.extend(call_fpars(alignment_files[-1], outfile, seed))
-					if args.fdollop:
-						treefiles.extend(call_fdollop(alignment_files[-1], outfile, seed))
-					if args.fmix:
-						treefiles.extend(call_fmix(alignment_files[-1], outfile,seed))
+#			elif args.fpars or args.fmix or args.fdollop and docontinue: #remove this sometime
+#				alignment_files.append(relaxed_2_strict_phylip(alignment_files[-1], alignment_files[-1].replace(".relaxed.", ".strict.")))
+#				if alignment_files[-1]!=None:
+#					if args.fpars:
+#						treefiles.extend(call_fpars(alignment_files[-1], outfile, seed))
+#					if args.fdollop:
+#						treefiles.extend(call_fdollop(alignment_files[-1], outfile, seed))
+#					if args.fmix:
+#						treefiles.extend(call_fmix(alignment_files[-1], outfile,seed))
 			if docontinue:
 				if verbose:
 					print "================================\FINISHED!"	
