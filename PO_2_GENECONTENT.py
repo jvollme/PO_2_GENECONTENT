@@ -22,6 +22,8 @@ myparser.add_argument("-tbp","--tree_builder_path", action="store", dest="treebu
 #myparser.add_argument("--mix", action="store_true", dest="fmix", default=False, help="Generate Parsimony phylogenetic tree using fmix with wagner parsimony (the EMBOSS implementation of the PHYLIP tool)\nDefault=don't use")
 #myparser.add_argument("--dollop", action="store_true", dest="fdollop", default=False, help="Generate Parsimony phyogenetic trees using fdollop and Dollo Parsimony (the EMBOSS implementation of the PHYLIP tool)\n Default=don't use")
 myparser.add_argument("-bs", "--bootstraps", action="store", dest="bootstraps", type=int, default=1000, help="Number of times to resample for bootstrapping\nonly makes sense in combination with '-mt raxml_bs' or '-mt raxml_rapidbs'\nDefault=1000")
+myparser.add_argument("--min_freq", action="store", dest="min_freq", type=int, default=2, help="Minimum frequency for Orthologeous Groups across all comparison-organisms for Group to be considered in Analyses\n Default=2 (exclude all singletons)")
+#myparser.add_argument("--ignore_columns", action="store", dest="ignore_column_list", default=None, help="indexes (starting with 1) of Organisms to be ignored when counting frequencies of Orthologeous Groups (Tip: ignore all but one representative member of overrepresented species/strains)")
 #implement bootsrapped versions of pars, mix and dollop soon
 args=myparser.parse_args()
 
@@ -32,6 +34,7 @@ wstrings, estrings, lstrings=[], [], [] #warning, error and log messages respect
 out_file, PO_file=args.out_file+"_"+time.strftime("%Y%m%d%H%M%S"), args.po_resultfile
 nthreads, seed, bootstraps=args.nthreads, args.seed_nr, args.bootstraps
 tree_method, treebuilder_path = args.tree_method, args.treebuilder_path
+min_freq=args.min_freq
 raxml_prog="raxmlHPC"
 logfilename=out_file+"_PO_2_GENECONTENT_"+time.strftime("%Y%m%d%H%M%S")+".log"
 verbose=True
@@ -166,20 +169,44 @@ def read_PO_file(filename):
 	for c in columns:
 		if len(c[1])!=len(columns[0][1]):
 			datsANerror("ERROR: something went wrong while reading proteinortho-results. Not the same number of lines (=OGs) for all Organisms!")
-	datsAlogmessage("\nrecognized "+str(len(columns[0]))+" total 'Orthologeous Groups' (OGs) + singletons in the comparison organisms")
-	OG_number=len(columns[0])
-	return headers, columns, OG_number
+	OG_number=len(columns[0][1])
+	datsAlogmessage("\nrecognized "+str(OG_number)+" total 'Orthologeous Groups' (OGs) + singletons in the comparison organisms")
+	OG_indices=range(1, OG_number+1) #I know, I know! NOT the best way to keep track of the indices of each OG based on the original PO_file! 
+	return headers, columns, OG_number, OG_indices
 	
-def write_binary_matrix(outname, columns):
+def filter_OGs_by_freq(minfreq, columns, column_indices):
+	datsAlogmessage("Filtering out all OGs with a frequency below " + str(minfreq) + " between all comparison organisms")
+	#filter out all OGs that do not occur in at leas minfreq comparison-organisms
+	#remember: columns are organized as [[organism1=[header],[OGs]], [organism2=[header],[OGs]],...]
+	line_index=0
+	#print "len(columns[0])="+str(len(columns[0]))
+	while line_index < len(columns[0][1]):
+		if verbose:
+			sys.stdout.write("\rProcessing OG "+str(line_index)+" from "+str(len(columns[0][1])))
+			sys.stdout.flush()
+		OG_sum=0
+		for organism in columns:
+			OG_sum += organism[1][line_index]
+		if OG_sum < minfreq:
+			for i in range(0, len(columns)):
+				columns[i][1].pop(line_index) #remove all lines that do not add up to minfreq
+			column_indices.pop(line_index) #adjust the inices accordinlgy
+		else:
+			#print "OG_sum = " + str(OG_sum)
+			line_index+=1 #check next line, if this one is ok
+	datsAlogmessage("\n"+str(len(columns[0][1])) + " OGs remaining after filtering")
+	return columns, column_indices
+	
+def write_binary_matrix(outname, columns, column_indices):
 	outfile=open(outname+".tab", "w")
-	headerstring="OG"
-	for c in columns:
-		headerstring+=("\t"+c[0])
-	outfile.write(headerstring+"\n")
-	for og_nr in range(len(columns[0][1])):
-		linestring=str(og_nr)
+	headerstring="OG"							#headerline
+	for c in columns:							#headerline
+		headerstring+=("\t"+c[0])				#headerline
+	outfile.write(headerstring+"\n")			#headerline
+	for index in range(0, len(column_indices)):		
+		linestring=str(column_indices[index])
 		for c in columns:
-			linestring+="\t"+str(c[1][og_nr])
+			linestring+="\t"+str(c[1][index])
 		outfile.write(linestring+"\n")
 	outfile.close()		
 	return outfile.name
@@ -225,7 +252,7 @@ def call_raxml_rapidbs(alignmentfile, outputfilename, seed, parameters): #parame
 	
 	datsAlogmessage("Calculating phylogenies: 'rapid bootstrap analyses and search for best-scoring ML Tree in one run' using raxmlHPC")
 	try:
-		outname="GENECONTENT_rapidBS"+str(bootstraps)+"_"+time.strftime("%Y%m%d%H%M%S")+"_"+"final_tree"	
+		outname="GENECONTENT_rapidBS"+str(bootstraps)+"_minfreq"+str(min_freq)+"_"+time.strftime("%Y%m%d%H%M%S")+"_"+"final_tree"	
 		raxml_cline=RaxmlCommandline(raxml_prog, sequences=alignmentfile, algorithm="a", model="BINGAMMA", name=outname, parsimony_seed=seed, rapid_bootstrap_seed=seed, num_replicates=bootstraps, threads=nr_threads) 
 		datsAlogmessage("-->"+str(raxml_cline))
 		raxml_cline()
@@ -277,7 +304,7 @@ def call_raxml_bs(alignmentfile, outputfilename, seed, parameters):
 		
 	datsAlogmessage("\tDrawing bipartitions of bootstrap trees onto best ML tree using raxmlHPC")
 	try:
-		outname="GENECONTENT_BS"+str(bootstraps)+"_"+time.strftime("%Y%m%d%H%M%S")+"_"+"final_tree"
+		outname="GENECONTENT_BS"+str(bootstraps)+"_minfreq"+str(min_freq)+time.strftime("%Y%m%d%H%M%S")+"_"+"final_tree"
 		raxml_cline=RaxmlCommandline(raxml_prog, model="BINGAMMA", parsimony_seed=seed, algorithm="b", starting_tree="RAxML_bestTree.best_delme_tempfile", bipartition_filename="RAxML_bootstrap.boot_delme_tempfile", name=outname)
 		datsAlogmessage("\t-->"+str(raxml_cline))
 		raxml_cline()
@@ -295,7 +322,7 @@ def call_raxml_nobs(alignmentfile, outputfilename, seed, parameters):
 	if "-T" in parameters:
 		nr_threads=parameters["-T"]
 	try:
-		outname="GENECONTENT_raxml_"+time.strftime("%Y%m%d%H%M%S")+"_"+"final_tree"
+		outname="GENECONTENT_raxml_"+"_minfreq"+str(min_freq)+time.strftime("%Y%m%d%H%M%S")+"_"+"final_tree"
 		datsAlogmessage("Calculating phylogeny: Determining best ML tree of 20 raxmlHPC runs")
 		raxml_cline=RaxmlCommandline(raxml_prog, sequences=alignmentfile, model="BINGAMMA", name=outname,  parsimony_seed=seed, num_replicates=20, threads=nr_threads)
 		datsAlogmessage("\t-->"+str(raxml_cline))
@@ -431,11 +458,13 @@ def main():
 	checkargs(args)
 	if docontinue:
 		try:
-			headers, columns, OG_number = read_PO_file(PO_file)
+			headers, columns, OG_number , column_indices= read_PO_file(PO_file)
+			if min_freq > 1:
+				columns, column_indices=filter_OGs_by_freq(min_freq, columns, column_indices)
 			if args.outfasta and docontinue:
 				alignment_files.append(write_binaryalignment_fasta(out_file, columns))
 			if args.outmatrix and docontinue:
-				alignment_files.append(write_binary_matrix(out_file, columns))
+				alignment_files.append(write_binary_matrix(out_file, columns, column_indices))
 			if docontinue:
 				alignment_files.append(write_binaryalignment_phylip(out_file, columns))
 			if tree_method=="raxml_rapidbs" and docontinue:
