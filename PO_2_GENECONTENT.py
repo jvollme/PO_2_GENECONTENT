@@ -13,12 +13,12 @@ myparser=argparse.ArgumentParser(description="\n==PO_2_GENECONTENT.py v1.01 by J
 myparser.add_argument("-po", "--proteinortho", action = "store", dest = "po_resultfile", help = "(String) file with proteinortho5 results", required = True)
 myparser.add_argument("-s", "--silent", action = "store_true", dest = "no_verbose", help = "non-verbose mode")
 myparser.add_argument("-o", "--out", action = "store", dest="out_file", default = "output", help = "Basename for result-files\nDefault='output'\nWill create a phylip-file of the aligned discrete binary character data by default")
-myparser.add_argument("-ofas", "--out_fasta", action = "store_true", dest = "outfasta", default = False, help = "Create a file with the aligned discrete binary character data in Fasta format (in addition to the default phylip file)")
-myparser.add_argument("-omat", "--out_matrix", action = "store_true", dest = "outmatrix", default = False, help = "Create a file with the aligned discrete character data in tabular format (in addition to the default phylip file)")
-myparser.add_argument("-odiff", "--out_difference", action = "store", dest = "outdiff", choices = ["simple", "none"], default = "simple", help = "Create (higly simplyfied) difference/similarity matrixes for distance matrix based phylogeny inference.\nDefault: Create difference matrixes") #only simply algorithm implemented for now. Add more complex methods and bootstrapping options
+myparser.add_argument("-ofas", "--out_fasta", action = "store_true", dest = "outfasta", default = False, help = "Create a file with the aligned discrete binary character data in Fasta format\n(in addition to the default phylip file)")
+myparser.add_argument("-omat", "--out_matrix", action = "store_true", dest = "outmatrix", default = False, help = "Create a file with the aligned discrete character data in tabular format\n(in addition to the default phylip file)")
+myparser.add_argument("-odiff", "--out_difference", action = "store", dest = "outdiff", choices = ["simple", "none", "braycurtis", "canberra", "cityblock", "jaccard", "euclidean"], default = "simple", help = "Create difference/similarity matrixes for distance matrix based phylogeny inference.\n\t- simple : Simple normalized distance matrix\n\t distance=Nr shared OGs/total Nr OGs in SMALLER organism\n\t- braycurtis : Bray-Curtis distance\n\t- canberra : Canberra distance\n\t- cityblock : Manhatten distance\n\t- euclidean : Euclidean distance\n\t- jaccard : Jaccard-Needham dissimilarity\nDefault: \"simple\"") #only simply algorithm implemented for now. Add more complex methods and bootstrapping options
 myparser.add_argument("-t", "--threads", action = "store", dest = "nthreads", type = int, default = 4, help = "Number of cpus to use\nDefault=4 (or maximum number of available cores, if less than 4 cores available)")
 myparser.add_argument("-sd", "--seed", action = "store", dest = "seed_nr", type = int, default = 0, help = "Integer to provide as seed for RAxML or PhyML\n0=seed generated randomly\nDefault=random seed")
-myparser.add_argument("-mt", "--make_tree", action = "store", dest = "tree_method", choices = ["raxml", "raxml_bs", "raxml_rapidbs", "none"], default = "none", help = "Generate ML phylogenetic trees using RAxML with \"new rapid hill climbing\" and substitution model: \"BINGAMMA\"\n\tchoices:\t\"raxml\": single tree without bootstraps (using new rapid hill climbing)\n\t\traxml_bs: thorough bootstrap analyses and search for best ML tree\n\t\traxml_rapidbs: rapid bootstrap analyses and search for best ML tree in one run\n\t\tnone\nDefault=none")
+myparser.add_argument("-mt", "--make_tree", action = "store", dest = "tree_method", choices = ["raxml", "raxml_bs", "raxml_rapidbs", "none"], default = "none", help = "Generate ML phylogenetic trees using RAxML with \"new rapid hill climbing\"\nand substitution model: \"BINGAMMA\"\n\t-\"raxml\": single tree without bootstraps (using new rapid hill climbing)\n\t-\"raxml_bs\": thorough bootstrap analyses and search for best ML tree\n\t-\"raxml_rapidbs\": rapid bootstrap analyses and search for best ML tree\n\t in one run\n\t-\"none\"\nDefault=none")
 myparser.add_argument("-tbp","--tree_builder_path", action="store", dest = "treebuilder_path", default = "", help = "Path to treebuilder (currently only raxml supported) if not listed in $PATH")
 #myparser.add_argument("--raxml", action="store_true", dest="raxml", default=False, help="Generate ML phylogenetic tree without bootstrap values using RAxML and \"new rapid hill climbing\" and substitution model: \"BINGAMMA\"\nDefault=don't use")
 #myparser.add_argument("--raxml_bs", action="store_true", dest="raxml_BS", default=False, help="Generate ML phylogenetic tree with thorough bootstrap analyses and search for best ML tree using RAxML and \"new rapid hill climbing\" and substitution model: \"BINGAMMA\"'\nDefault: don't use")
@@ -220,10 +220,19 @@ def write_binary_matrix(outname, columns, column_indices):
 
 #def create_bootstrap_permutations(nr_bs, outname, columns, column_indices):
 #	
-def calculate_sim_matrix_professional(headers, outname, columns, method):
-	pass
+def calculate_sim_matrix_professional(outname, columns, method):
+	import scipy.spatial.distance as dist
+	print "Generating similarity/distance matrices using " + method  
+	method_dict = {"braycurtis":dist.braycurtis, "canberra":dist.canberra, "cityblock":dist.cityblock, "jaccard":dist.jaccard, "euclidean":dist.euclidean}
+	matrix_dict = {}
+	for c1 in columns:
+		matrix_dict[c1[0]] = {"similarity_dict":{}, "difference_dict":{}}
+		for c2 in columns:
+			matrix_dict[c1[0]]["difference_dict"][c2[0]] = method_dict[method](c1[1], c2[1])
+			matrix_dict[c1[0]]["similarity_dict"][c2[0]] = 1- matrix_dict[c1[0]]["difference_dict"][c2[0]]
+	return matrix_dict
 
-def calculate_sim_matrix_simple(headers, outname, columns): 
+def calculate_sim_matrix_simple(outname, columns): 
 	print "calculating simple similarity and difference matrices"
 	#calculate a simple similarity/difference matrix based on the shared genecontent between the comparison organisms
 	#for each comparison-pair, add up all shared OGs. Then divide the sum of each pair by the number of genes in the smaller genome of each pair
@@ -527,8 +536,11 @@ def main():
 				columns, column_indices = filter_OGs_by_freq(min_freq, columns, column_indices)
 			if args.outfasta and docontinue:
 				alignment_files.append(write_binaryalignment_fasta(out_file, columns))
-			if args.outdiff == "simple" and docontinue:
-				sim_matrix_dict = calculate_sim_matrix_simple(headers, out_file, columns)
+			if args.outdiff != "none" and docontinue:
+				if args.outdiff == "simple":
+					sim_matrix_dict = calculate_sim_matrix_simple(out_file, columns)
+				else:
+					sim_matrix_dict = calculate_sim_matrix_professional(out_file, columns, args.outdiff)
 				alignment_files.extend(write_sim_dif_matrix(headers, out_file, sim_matrix_dict, args.outdiff))
 			if args.outmatrix and docontinue:
 				alignment_files.append(write_binary_matrix(out_file, columns, column_indices))
