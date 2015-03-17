@@ -1,16 +1,21 @@
 #!/usr/bin/python
 #created 21.06.2014 by John Vollmers
 #from Bio.Phylo.TreeConstruction import * #for using the directly biopython-implemented Distance(UPGMA + NJ) and parsimony methods. Not done/necessary yet
-import os, sys, argparse, time, multiprocessing, random
+import os, sys, argparse, time, multiprocessing, random, traceback
 from Bio import AlignIO, SeqIO
 from subprocess import call
 from Bio.Phylo.Applications import RaxmlCommandline, PhymlCommandline
-myparser=argparse.ArgumentParser(description="\n==PO_2_GENECONTENT.py v1.01 by John Vollmers==\nCreates discrete binary character matrices and phylogenetic trees based on the gene content (presence/absence of orthologues) in comparison organisms.\nThis script is supposed to be part of a pipeline consisting of:\n\tA.)Conversion of Genbank/Embl-Files to ANNOTATED(!) Fastas using CDS_extractor.pl by Andreas Leimbach\n\tB.)Calculation of orthologs and paralogs using proteinortho5 (WITH the '-single' and '-self' arguments!)\n\tC.)The creation of discrete binary character marices (and optionally phylogenetic trees) based on:\n\t\t-the fasta sequences of step A\n\t\t-the proteinortho5-results from step B\n", formatter_class=argparse.RawTextHelpFormatter)
+myparser=argparse.ArgumentParser(description="\n==PO_2_GENECONTENT.py v1.01 by John Vollmers==\nCreates discrete binary character matrices and phylogenetic trees based on the gene content (presence/absence of orthologues) in comparison organisms.\nThis script is supposed to be part of a pipeline consisting of:\n\
+\tA.)Conversion of Genbank/Embl-Files to ANNOTATED(!) Fastas\n\t   using CDS_extractor.pl by Andreas Leimbach\n\
+\tB.)Calculation of orthologs and paralogs using proteinortho5\n\t   (WITH the '-single' and '-self' arguments!)\n\
+\tC.)The creation of discrete binary character marices\n\t   (and optionally phylogenetic trees) based on:\n\t\t-the fasta sequences of step A\n\
+\t\t-the proteinortho5-results from step B\n", formatter_class=argparse.RawTextHelpFormatter)
 myparser.add_argument("-po", "--proteinortho", action = "store", dest = "po_resultfile", help = "(String) file with proteinortho5 results", required = True)
 myparser.add_argument("-s", "--silent", action = "store_true", dest = "no_verbose", help = "non-verbose mode")
 myparser.add_argument("-o", "--out", action = "store", dest="out_file", default = "output", help = "Basename for result-files\nDefault='output'\nWill create a phylip-file of the aligned discrete binary character data by default")
-myparser.add_argument("-ofas", "--out_fasta", action = "store_true", dest = "outfasta", help = "Create a file with the aligned discrete binary character data in Fasta format (in addition to the default phylip file)")
-myparser.add_argument("-omat", "--out_matrix", action = "store_true", dest = "outmatrix", help = "Create a file with the aligned discrete character data in tabular format (in addition to the default phylip file)")
+myparser.add_argument("-ofas", "--out_fasta", action = "store_true", dest = "outfasta", default = False, help = "Create a file with the aligned discrete binary character data in Fasta format (in addition to the default phylip file)")
+myparser.add_argument("-omat", "--out_matrix", action = "store_true", dest = "outmatrix", default = False, help = "Create a file with the aligned discrete character data in tabular format (in addition to the default phylip file)")
+myparser.add_argument("-odiff", "--out_difference", action = "store", dest = "outdiff", choices = ["simple", "none"], default = "simple", help = "Create (higly simplyfied) difference/similarity matrixes for distance matrix based phylogeny inference.\nDefault: Create difference matrixes") #only simply algorithm implemented for now. Add more complex methods and bootstrapping options
 myparser.add_argument("-t", "--threads", action = "store", dest = "nthreads", type = int, default = 4, help = "Number of cpus to use\nDefault=4 (or maximum number of available cores, if less than 4 cores available)")
 myparser.add_argument("-sd", "--seed", action = "store", dest = "seed_nr", type = int, default = 0, help = "Integer to provide as seed for RAxML or PhyML\n0=seed generated randomly\nDefault=random seed")
 myparser.add_argument("-mt", "--make_tree", action = "store", dest = "tree_method", choices = ["raxml", "raxml_bs", "raxml_rapidbs", "none"], default = "none", help = "Generate ML phylogenetic trees using RAxML with \"new rapid hill climbing\" and substitution model: \"BINGAMMA\"\n\tchoices:\t\"raxml\": single tree without bootstraps (using new rapid hill climbing)\n\t\traxml_bs: thorough bootstrap analyses and search for best ML tree\n\t\traxml_rapidbs: rapid bootstrap analyses and search for best ML tree in one run\n\t\tnone\nDefault=none")
@@ -27,7 +32,7 @@ myparser.add_argument("--min_freq", action = "store", dest = "min_freq", type=in
 #implement bootsrapped versions of pars, mix and dollop soon
 args = myparser.parse_args()
 
-version = "v0.2"
+version = "v0.3"
 OG_number = 0
 available_cores = multiprocessing.cpu_count() #counts how many cores are available, to check if the user-argument for threads can be fulfilled
 wstrings, estrings, lstrings = [], [], [] #warning, error and log messages respectively
@@ -43,8 +48,8 @@ docontinue = True
 
 def randomnumber():
 	#returns a random integer to use as seed for rxml and pyml
-    random.seed()
-    return random.randint(1,2000)
+	random.seed()
+	return random.randint(1,2000)
 
 def checkargs(args):
 	global verbose, nthreads, seed, bootstraps, tree_method, raxml_prog
@@ -151,6 +156,7 @@ def read_PO_file(filename):
 			else:
 				datsAwarning("WARNING! Cannot clearly recognize Format of Proteinortho-results! This may produce erroneous results!\n\t For best results use Proteinortho5!") 
 			headers = line.rstrip().split("\t")[org_index:]
+			#dict_org_genecounts = dict.fromkeys(headers, 0) #for counting number of genes in each organism for calculation of simple difference/similarity matrizes
 			columns = [[h.rstrip(),[]] for h in headers]
 			firstline = False
 		elif not line.startswith("#"):
@@ -162,6 +168,7 @@ def read_PO_file(filename):
 				if zeilentokens[h] == "*":
 					columns[h][1].append(0) #if no homolog = 0
 				else:
+					#dict_org_genecounts[headers[h]] += len(zeilentokens.split(",")) 
 					columns[h][1].append(1) #if homolog = 1
 					#print zeilentokens
 	open_PO_file.close()
@@ -210,6 +217,63 @@ def write_binary_matrix(outname, columns, column_indices):
 		outfile.write(linestring + "\n")
 	outfile.close()		
 	return outfile.name
+
+#def create_bootstrap_permutations(nr_bs, outname, columns, column_indices):
+#	
+
+def calculate_sim_matrix_simple(headers, outname, columns, column_indices): 
+	#calculate a simple similarity/difference matrix based on the shared genecontent between the comparison organisms
+	#for each comparison-pair, add up all shared OGs. Then divide the sum of each pair by the number of genes in the smaller genome of each pair
+	#this provides a simple correction for genome size
+	sim_matrix_dict = {}
+	for c1 in columns:
+#		print c1
+		sim_matrix_dict[c1[0]] = {"total_og_count":sum(c1[1]), "shared_og_dict":{}, "similarity_dict":{}}
+		#total_og_count=tota sum of OGs in respective organism, shared_og_dict=dictionary containing numbers ogs shared with each comparison organism
+		#similarity_dict=for each comparison_organism: shared_ogs/smaller_total_og_count_of_comparison_pair
+		for c2 in columns:
+			sum_shared = 0
+			for og_index in range(0, len(c1[1])):
+#				print "org1"
+#				print c1[1][og_index]
+#				print "org2"
+#				print c2[1][og_index]
+				if c1[1][og_index] == 1 and c2[1][og_index] == 1:
+#					print "YEEES"
+					sum_shared += 1
+			sim_matrix_dict[c1[0]]["shared_og_dict"][c2[0]] = sum_shared
+	print "===testing list==="
+	for org1 in sim_matrix_dict: #now calculate the actual similarity values
+#		print org1
+		for org2 in sim_matrix_dict:
+			print "test: " + org1 + " vs " + org2
+			print " shared: " +  str(sim_matrix_dict[org1]["shared_og_dict"][org2]) + " count_org1: " + str(sim_matrix_dict[org1]["total_og_count"]) + " count_org2: " + str(sim_matrix_dict[org2]["total_og_count"]) + " min: " + str(min(sim_matrix_dict[org1]["total_og_count"], sim_matrix_dict[org2]["total_og_count"]))
+			sim_matrix_dict[org1]["similarity_dict"][org2] = float(sim_matrix_dict[org1]["shared_og_dict"][org2]) / min(sim_matrix_dict[org1]["total_og_count"], sim_matrix_dict[org2]["total_og_count"])
+			print "similarity = " + str(float(sim_matrix_dict[org1]["shared_og_dict"][org2]) / min(sim_matrix_dict[org1]["total_og_count"], sim_matrix_dict[org2]["total_og_count"]))
+	return sim_matrix_dict
+
+def write_sim_dif_matrix(headers, outname, sim_matrix_dict): #adapt for creating bootstraps (multiple marices in phylip format)
+	#using the headers list to arrange the organisms as in the input data (dictionaries get all jumbled up)
+	print "writing similarity and difference matrices"
+	outfilesim = open(outname + ".sim", "w")
+	outfilediff = open(outname + ".diff", "w")
+	firstline = ""
+	for org1 in headers:
+		current_sim_line, current_diff_line = org1 , org1
+		current_line = org1
+		for org2 in headers:
+			if firstline != None:
+				firstline += "\t" + org2
+			current_sim_line += "\t" + str(sim_matrix_dict[org1]["similarity_dict"][org2])
+			current_diff_line += "\t" + str(1 - sim_matrix_dict[org1]["similarity_dict"][org2])
+#			print current_diff_line
+		if firstline != None:
+			outfilesim.write(firstline + "\n")
+			outfilediff.write(firstline + "\n")
+			firstline = None
+		outfilesim.write(current_sim_line + "\n")
+		outfilediff.write(current_diff_line + "\n")
+	return outname + ".sim", outname + ".diff"
 
 def write_binaryalignment_fasta(outputfilename, columns):
 	outfile = open(outputfilename+".fas", "w")
@@ -316,7 +380,7 @@ def call_raxml_bs(alignmentfile, outputfilename, seed, parameters):
 		datsAwarning("WARNING: thorough bootstrap analyses using raxmlHPC failed!\n\t"+str(e))
 		return None
 	return outputfiles
-			
+
 def call_raxml_nobs(alignmentfile, outputfilename, seed, parameters):
 	nr_threads=4
 	if "-T" in parameters:
@@ -341,7 +405,7 @@ def call_raxml_nobs(alignmentfile, outputfilename, seed, parameters):
 		return None
 	return outputfiles
 
-def relaxed_2_strict_phylip(input_file, output_file):
+def relaxed_2_strict_phylip(input_file, output_file): #create library with uniqe 10 character names
 	datsAlogmessage("converting relaxed phylip format ('"+input_file+"') to strict sequential phylip format('" + output_file + "')")
 	datsAlogmessage("CAREFUL: Names will be shortened to 10 characters! This may affect branch labeling!")
 	try:
@@ -431,7 +495,7 @@ def call_fdollop(alignmentfile, out_file, seed):
 	#return something
 	
 def call_phyml():
-	# NOPE!
+	# implement phylip tools (neighborjoining etc) for distance based tree inference (phylip neighbor etc)
 	pass
 
 def write_logfile(logfilename):
@@ -462,6 +526,9 @@ def main():
 				columns, column_indices = filter_OGs_by_freq(min_freq, columns, column_indices)
 			if args.outfasta and docontinue:
 				alignment_files.append(write_binaryalignment_fasta(out_file, columns))
+			if args.outdiff == "simple" and docontinue:
+				sim_matrix_dict = calculate_sim_matrix_simple(headers, out_file, columns, column_indices)
+				alignment_files.extend(write_sim_dif_matrix(headers, out_file, sim_matrix_dict))
 			if args.outmatrix and docontinue:
 				alignment_files.append(write_binary_matrix(out_file, columns, column_indices))
 			if docontinue:
@@ -489,6 +556,9 @@ def main():
 				datsAlogmessage("Created the following tree-files:" + "\n\t-".join(tree_files))					
 		except Exception as e:
 			datsAlogmessage(str(e))
+			for frame in traceback.extract_tb(sys.exc_info()[2]):
+				fname,lineno,fn,text = frame
+				print "Error in %s on line %d" % (fname, lineno)
 		finally:
 			datsAlogmessage("cleaning up...")
 			for delfile in os.listdir("."):
