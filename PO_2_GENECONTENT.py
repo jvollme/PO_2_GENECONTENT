@@ -32,7 +32,7 @@ myparser.add_argument("--min_freq", action = "store", dest = "min_freq", type=in
 #implement bootsrapped versions of pars, mix and dollop soon
 args = myparser.parse_args()
 
-version = "v0.3"
+version = "v0.4"
 OG_number = 0
 available_cores = multiprocessing.cpu_count() #counts how many cores are available, to check if the user-argument for threads can be fulfilled
 wstrings, estrings, lstrings = [], [], [] #warning, error and log messages respectively
@@ -221,7 +221,10 @@ def write_binary_matrix(outname, columns, column_indices):
 #def create_bootstrap_permutations(nr_bs, outname, columns, column_indices):
 #	
 def calculate_sim_matrix_professional(outname, columns, method):
-	import scipy.spatial.distance as dist
+	try:
+		import scipy.spatial.distance as dist #check if biopythons distance calculation can be used for binary character data as well!
+	except ImportError:
+		datsANerror("SciPy (http://scipy.org/) needs to be installed to use the distance-calculation method \"" + method +"\"\nWithout this module only methods \"simple\" and \"none\" are available")
 	print "Generating similarity/distance matrices using " + method  
 	method_dict = {"braycurtis":dist.braycurtis, "canberra":dist.canberra, "cityblock":dist.cityblock, "jaccard":dist.jaccard, "euclidean":dist.euclidean}
 	matrix_dict = {}
@@ -231,6 +234,34 @@ def calculate_sim_matrix_professional(outname, columns, method):
 			matrix_dict[c1[0]]["difference_dict"][c2[0]] = method_dict[method](c1[1], c2[1])
 			matrix_dict[c1[0]]["similarity_dict"][c2[0]] = 1- matrix_dict[c1[0]]["difference_dict"][c2[0]]
 	return matrix_dict
+
+def matrix_dict_to_matrix_obj(matrix_dict, headers): #headers-list is necessary to enforce original order of organisms in final matrix (dicts get all jumbled up)
+	#this function converts my square tabular matrix format to a triangular format biopython matrix object 
+	print "converting matrix_dict to biopython matrix_object" 
+	from Bio.Phylo.TreeConstruction import _Matrix, _DistanceMatrix
+	matrix_type = "difference_dict"
+	matrix_list = []
+	for indexa in range(0,len(headers)):
+		indexb = 0
+		org1 = headers[indexa]
+		matrix_list.append([])
+		while indexb <= indexa:
+			org2 = headers[indexb]
+			matrix_list[indexa].append(matrix_dict[org1][matrix_type][org2])
+			indexb += 1
+	matrix_obj = _DistanceMatrix(headers, matrix_list)
+#	print matrix_obj
+	return matrix_obj
+
+def calculate_NJ_tree(outname, matrix_obj):
+	from Bio import Phylo
+	from Bio.Phylo.TreeConstruction import DistanceTreeConstructor
+	constructor = DistanceTreeConstructor()
+	tree = constructor.nj(matrix_obj)
+	out_file = open(outname + ".nj.tree", "w")
+	Phylo.write(tree, out_file, "newick")
+	out_file.close()
+
 
 def calculate_sim_matrix_simple(outname, columns): 
 	print "calculating simple similarity and difference matrices"
@@ -538,10 +569,12 @@ def main():
 				alignment_files.append(write_binaryalignment_fasta(out_file, columns))
 			if args.outdiff != "none" and docontinue:
 				if args.outdiff == "simple":
-					sim_matrix_dict = calculate_sim_matrix_simple(out_file, columns)
+					matrix_dict = calculate_sim_matrix_simple(out_file, columns)
 				else:
-					sim_matrix_dict = calculate_sim_matrix_professional(out_file, columns, args.outdiff)
-				alignment_files.extend(write_sim_dif_matrix(headers, out_file, sim_matrix_dict, args.outdiff))
+					matrix_dict = calculate_sim_matrix_professional(out_file, columns, args.outdiff)
+				alignment_files.extend(write_sim_dif_matrix(headers, out_file, matrix_dict, args.outdiff))
+				matrix_obj = matrix_dict_to_matrix_obj(matrix_dict, headers)
+				calculate_NJ_tree(out_file + ".args.outdiff", matrix_obj)
 			if args.outmatrix and docontinue:
 				alignment_files.append(write_binary_matrix(out_file, columns, column_indices))
 			if docontinue:
@@ -566,7 +599,7 @@ def main():
 				if verbose:
 					print "================================\FINISHED!"	
 				datsAlogmessage("Created the following alignment-files:" + "\n\t-".join(alignment_files))
-				datsAlogmessage("Created the following tree-files:" + "\n\t-".join(tree_files))					
+				datsAlogmessage("Created the following tree-files:" + "\n\t-".join(tree_files))
 		except Exception as e:
 			datsAlogmessage(str(e))
 			for frame in traceback.extract_tb(sys.exc_info()[2]):
