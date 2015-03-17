@@ -220,43 +220,44 @@ def write_binary_matrix(outname, columns, column_indices):
 
 #def create_bootstrap_permutations(nr_bs, outname, columns, column_indices):
 #	
+def calculate_sim_matrix_professional(headers, outname, columns, method):
+	pass
 
-def calculate_sim_matrix_simple(headers, outname, columns, column_indices): 
+def calculate_sim_matrix_simple(headers, outname, columns): 
+	print "calculating simple similarity and difference matrices"
 	#calculate a simple similarity/difference matrix based on the shared genecontent between the comparison organisms
 	#for each comparison-pair, add up all shared OGs. Then divide the sum of each pair by the number of genes in the smaller genome of each pair
 	#this provides a simple correction for genome size
-	sim_matrix_dict = {}
+	matrix_dict = {}
+	sim_calc_dict = {}
 	for c1 in columns:
 #		print c1
-		sim_matrix_dict[c1[0]] = {"total_og_count":sum(c1[1]), "shared_og_dict":{}, "similarity_dict":{}}
+		sim_calc_dict[c1[0]] = {"total_og_count":sum(c1[1]), "shared_og_dict":{}}
+		matrix_dict[c1[0]] = {"similarity_dict":{}, "difference_dict":{}}
 		#total_og_count=tota sum of OGs in respective organism, shared_og_dict=dictionary containing numbers ogs shared with each comparison organism
 		#similarity_dict=for each comparison_organism: shared_ogs/smaller_total_og_count_of_comparison_pair
 		for c2 in columns:
 			sum_shared = 0
 			for og_index in range(0, len(c1[1])):
-#				print "org1"
-#				print c1[1][og_index]
-#				print "org2"
-#				print c2[1][og_index]
 				if c1[1][og_index] == 1 and c2[1][og_index] == 1:
-#					print "YEEES"
 					sum_shared += 1
-			sim_matrix_dict[c1[0]]["shared_og_dict"][c2[0]] = sum_shared
+			sim_calc_dict[c1[0]]["shared_og_dict"][c2[0]] = sum_shared
 	print "===testing list==="
-	for org1 in sim_matrix_dict: #now calculate the actual similarity values
+	for org1 in sim_calc_dict: #now calculate the actual similarity values
 #		print org1
-		for org2 in sim_matrix_dict:
+		for org2 in sim_calc_dict:
 			print "test: " + org1 + " vs " + org2
-			print " shared: " +  str(sim_matrix_dict[org1]["shared_og_dict"][org2]) + " count_org1: " + str(sim_matrix_dict[org1]["total_og_count"]) + " count_org2: " + str(sim_matrix_dict[org2]["total_og_count"]) + " min: " + str(min(sim_matrix_dict[org1]["total_og_count"], sim_matrix_dict[org2]["total_og_count"]))
-			sim_matrix_dict[org1]["similarity_dict"][org2] = float(sim_matrix_dict[org1]["shared_og_dict"][org2]) / min(sim_matrix_dict[org1]["total_og_count"], sim_matrix_dict[org2]["total_og_count"])
-			print "similarity = " + str(float(sim_matrix_dict[org1]["shared_og_dict"][org2]) / min(sim_matrix_dict[org1]["total_og_count"], sim_matrix_dict[org2]["total_og_count"]))
-	return sim_matrix_dict
+#			print " shared: " +  str(sim_matrix_dict[org1]["shared_og_dict"][org2]) + " count_org1: " + str(sim_matrix_dict[org1]["total_og_count"]) + " count_org2: " + str(sim_matrix_dict[org2]["total_og_count"]) + " min: " + str(min(sim_matrix_dict[org1]["total_og_count"], sim_matrix_dict[org2]["total_og_count"]))
+			matrix_dict[org1]["similarity_dict"][org2] = float(sim_calc_dict[org1]["shared_og_dict"][org2]) / min(sim_calc_dict[org1]["total_og_count"], sim_calc_dict[org2]["total_og_count"])
+			print "similarity = " + str(float(sim_calc_dict[org1]["shared_og_dict"][org2]) / min(sim_calc_dict[org1]["total_og_count"], sim_calc_dict[org2]["total_og_count"]))
+			matrix_dict[org1]["difference_dict"][org2] = 1 - matrix_dict[org1]["similarity_dict"][org2]
+	return matrix_dict
 
-def write_sim_dif_matrix(headers, outname, sim_matrix_dict): #adapt for creating bootstraps (multiple marices in phylip format)
+def write_sim_dif_matrix(headers, outname, matrix_dict, matrix_method): #adapt for creating bootstraps (multiple marices in phylip format)
 	#using the headers list to arrange the organisms as in the input data (dictionaries get all jumbled up)
 	print "writing similarity and difference matrices"
-	outfilesim = open(outname + ".sim", "w")
-	outfilediff = open(outname + ".diff", "w")
+	outfilesim = open(outname + "." + matrix_method + ".sim", "w")
+	outfilediff = open(outname + "." + matrix_method + ".diff", "w")
 	firstline = ""
 	for org1 in headers:
 		current_sim_line, current_diff_line = org1 , org1
@@ -264,8 +265,8 @@ def write_sim_dif_matrix(headers, outname, sim_matrix_dict): #adapt for creating
 		for org2 in headers:
 			if firstline != None:
 				firstline += "\t" + org2
-			current_sim_line += "\t" + str(sim_matrix_dict[org1]["similarity_dict"][org2])
-			current_diff_line += "\t" + str(1 - sim_matrix_dict[org1]["similarity_dict"][org2])
+			current_sim_line += "\t" + str(matrix_dict[org1]["similarity_dict"][org2])
+			current_diff_line += "\t" + str(matrix_dict[org1]["difference_dict"][org2])
 #			print current_diff_line
 		if firstline != None:
 			outfilesim.write(firstline + "\n")
@@ -273,7 +274,7 @@ def write_sim_dif_matrix(headers, outname, sim_matrix_dict): #adapt for creating
 			firstline = None
 		outfilesim.write(current_sim_line + "\n")
 		outfilediff.write(current_diff_line + "\n")
-	return outname + ".sim", outname + ".diff"
+	return outfilesim.name, outfilediff.name
 
 def write_binaryalignment_fasta(outputfilename, columns):
 	outfile = open(outputfilename+".fas", "w")
@@ -527,8 +528,8 @@ def main():
 			if args.outfasta and docontinue:
 				alignment_files.append(write_binaryalignment_fasta(out_file, columns))
 			if args.outdiff == "simple" and docontinue:
-				sim_matrix_dict = calculate_sim_matrix_simple(headers, out_file, columns, column_indices)
-				alignment_files.extend(write_sim_dif_matrix(headers, out_file, sim_matrix_dict))
+				sim_matrix_dict = calculate_sim_matrix_simple(headers, out_file, columns)
+				alignment_files.extend(write_sim_dif_matrix(headers, out_file, sim_matrix_dict, args.outdiff))
 			if args.outmatrix and docontinue:
 				alignment_files.append(write_binary_matrix(out_file, columns, column_indices))
 			if docontinue:
