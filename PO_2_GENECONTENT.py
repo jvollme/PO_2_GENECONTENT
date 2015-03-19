@@ -1,7 +1,7 @@
 #!/usr/bin/python
 #created 21.06.2014 by John Vollmers
 #from Bio.Phylo.TreeConstruction import * #for using the directly biopython-implemented Distance(UPGMA + NJ) and parsimony methods. Not done/necessary yet
-import os, sys, argparse, time, multiprocessing, random, traceback
+import os, sys, argparse, time, multiprocessing, random, traceback, Bio
 from Bio import AlignIO, SeqIO
 from subprocess import call
 from Bio.Phylo.Applications import RaxmlCommandline, PhymlCommandline
@@ -15,10 +15,10 @@ myparser.add_argument("-s", "--silent", action = "store_true", dest = "no_verbos
 myparser.add_argument("-o", "--out", action = "store", dest="out_file", default = "output", help = "Basename for result-files\nDefault='output'\nWill create a phylip-file of the aligned discrete binary character data by default")
 myparser.add_argument("-ofas", "--out_fasta", action = "store_true", dest = "outfasta", default = False, help = "Create a file with the aligned discrete binary character data in Fasta format\n(in addition to the default phylip file)")
 myparser.add_argument("-omat", "--out_matrix", action = "store_true", dest = "outmatrix", default = False, help = "Create a file with the aligned discrete character data in tabular format\n(in addition to the default phylip file)")
-myparser.add_argument("-odiff", "--out_difference", action = "store", dest = "outdiff", choices = ["simple", "none", "braycurtis", "canberra", "cityblock", "jaccard", "euclidean"], default = "simple", help = "Create difference/similarity matrixes for distance matrix based phylogeny inference.\n\t- simple : Simple normalized distance matrix\n\t distance=Nr shared OGs/total Nr OGs in SMALLER organism\n\t- braycurtis : Bray-Curtis distance\n\t- canberra : Canberra distance\n\t- cityblock : Manhatten distance\n\t- euclidean : Euclidean distance\n\t- jaccard : Jaccard-Needham dissimilarity\nDefault: \"simple\"") #only simply algorithm implemented for now. Add more complex methods and bootstrapping options
+myparser.add_argument("-odiff", action = "store", dest = "outdiff", choices = ["simple", "none", "braycurtis", "canberra", "cityblock", "jaccard", "euclidean"], default = "simple", help = "Create difference/similarity matrixes for distance matrix based phylogeny inference.\n\t- simple : Simple normalized distance matrix\n\t  (distance=Nr shared OGs/total Nr OGs in SMALLER organism)\n\t- braycurtis : Bray-Curtis distance\n\t- canberra : Canberra distance\n\t- cityblock : Manhatten distance\n\t- euclidean : Euclidean distance\n\t- jaccard : Jaccard-Needham dissimilarity\nDefault: \"simple\"") #only simply algorithm implemented for now. Add more complex methods and bootstrapping options
 myparser.add_argument("-t", "--threads", action = "store", dest = "nthreads", type = int, default = 4, help = "Number of cpus to use\nDefault=4 (or maximum number of available cores, if less than 4 cores available)")
 myparser.add_argument("-sd", "--seed", action = "store", dest = "seed_nr", type = int, default = 0, help = "Integer to provide as seed for RAxML or PhyML\n0=seed generated randomly\nDefault=random seed")
-myparser.add_argument("-mt", "--make_tree", action = "store", dest = "tree_method", choices = ["raxml", "raxml_bs", "raxml_rapidbs", "none"], default = "none", help = "Generate ML phylogenetic trees using RAxML with \"new rapid hill climbing\"\nand substitution model: \"BINGAMMA\"\n\t-\"raxml\": single tree without bootstraps (using new rapid hill climbing)\n\t-\"raxml_bs\": thorough bootstrap analyses and search for best ML tree\n\t-\"raxml_rapidbs\": rapid bootstrap analyses and search for best ML tree\n\t in one run\n\t-\"none\"\nDefault=none")
+myparser.add_argument("-mt", "--make_tree", action = "store", dest = "tree_method", choices = ["raxml", "raxml_bs", "raxml_rapidbs", "nj", "nj_bs", "none"], default = "none", help = "Generate ML phylogenetic trees using RAxML with \"new rapid hill climbing\"\nand substitution model: \"BINGAMMA\"\n\t-\"raxml\": single tree without bootstraps (using new rapid hill climbing)\n\t-\"raxml_bs\": thorough bootstrap analyses and search for best ML tree\n\t-\"raxml_rapidbs\": rapid bootstrap analyses and search for best ML tree\n\t in one run\n\t-\"nj\": Neighbor joining\n\t-\"none\"\nDefault=none")
 myparser.add_argument("-tbp","--tree_builder_path", action="store", dest = "treebuilder_path", default = "", help = "Path to treebuilder (currently only raxml supported) if not listed in $PATH")
 #myparser.add_argument("--raxml", action="store_true", dest="raxml", default=False, help="Generate ML phylogenetic tree without bootstrap values using RAxML and \"new rapid hill climbing\" and substitution model: \"BINGAMMA\"\nDefault=don't use")
 #myparser.add_argument("--raxml_bs", action="store_true", dest="raxml_BS", default=False, help="Generate ML phylogenetic tree with thorough bootstrap analyses and search for best ML tree using RAxML and \"new rapid hill climbing\" and substitution model: \"BINGAMMA\"'\nDefault: don't use")
@@ -26,13 +26,13 @@ myparser.add_argument("-tbp","--tree_builder_path", action="store", dest = "tree
 #myparser.add_argument("--pars", action="store_true", dest="fpars", default=False, help="Generate Parsimony phylogenetic tree using fpars (the EMBOSS implementation of the PHYLIP tool)\nDefault: don't use")
 #myparser.add_argument("--mix", action="store_true", dest="fmix", default=False, help="Generate Parsimony phylogenetic tree using fmix with wagner parsimony (the EMBOSS implementation of the PHYLIP tool)\nDefault=don't use")
 #myparser.add_argument("--dollop", action="store_true", dest="fdollop", default=False, help="Generate Parsimony phyogenetic trees using fdollop and Dollo Parsimony (the EMBOSS implementation of the PHYLIP tool)\n Default=don't use")
-myparser.add_argument("-bs", "--bootstraps", action = "store", dest = "bootstraps", type = int, default = 1000, help = "Number of times to resample for bootstrapping\nonly makes sense in combination with '-mt raxml_bs' or '-mt raxml_rapidbs'\nDefault=1000")
-myparser.add_argument("--min_freq", action = "store", dest = "min_freq", type=int, default = 2, help = "Minimum frequency for Orthologeous Groups across all comparison-organisms for Group to be considered in Analyses\n Default=2 (exclude all singletons)")
+myparser.add_argument("-bs", "--bootstraps", action = "store", dest = "bootstraps", type = int, default = 1000, help = "Number of times to resample for bootstrapping\nonly bootstrapped trees will be produced, not the permutated data matrices")
+myparser.add_argument("--min_freq", action = "store", dest = "min_freq", type=int, default = 2, help = "Minimum frequency for Orthologeous Groups across all comparison-organisms\nfor Group to be considered in Analyses\nDefault=2 (exclude all singletons)\nRecommended when working with highly fragmented genomes or dubious ORF-finding")
 #myparser.add_argument("--ignore_columns", action="store", dest="ignore_column_list", default=None, help="indexes (starting with 1) of Organisms to be ignored when counting frequencies of Orthologeous Groups (Tip: ignore all but one representative member of overrepresented species/strains)")
 #implement bootsrapped versions of pars, mix and dollop soon
 args = myparser.parse_args()
 
-version = "v0.4"
+version = "v0.5"
 OG_number = 0
 available_cores = multiprocessing.cpu_count() #counts how many cores are available, to check if the user-argument for threads can be fulfilled
 wstrings, estrings, lstrings = [], [], [] #warning, error and log messages respectively
@@ -46,10 +46,10 @@ verbose = True
 docontinue = True
 
 
-def randomnumber():
+def randomnumber(min, max):
 	#returns a random integer to use as seed for rxml and pyml
 	random.seed()
-	return random.randint(1,2000)
+	return random.randint(min,max)
 
 def checkargs(args):
 	global verbose, nthreads, seed, bootstraps, tree_method, raxml_prog
@@ -62,12 +62,12 @@ def checkargs(args):
 		datsAwarning("WARNING: less than " + str(nthreads) + " cores/threads available! Setting nthreads to " + str(available_cores))
 		nthreads = available_cores
 		
-	if seed == 0:
-		seed = randomnumber()
+	if seed == 0 and "raxml" in tree_method:
+		seed = randomnumber(1, 2000)
 		datsAlogmessage("Setting seed randomly to " + str(seed))
-	else:
+	elif "raxml" in tree_method:
 		datsAlogmessage("Using " + str(seed) + " as seed")
-	if tree_method != "none":
+	if "raxml" in tree_method:
 		if treebuilder_path == "":
 			if which("raxmlHPC") == None and which("raxmlHPC-PTHREADS") == None and which("raxmlHPC-PTHREADS-SSE3") == None and which("raxmlHPC-SSE3") == None:
 				datsANerror("ERROR: No raxmlHPC binaries found in any directory within $PATH! please provide a PATH to raxml binaries!")
@@ -218,14 +218,50 @@ def write_binary_matrix(outname, columns, column_indices):
 	outfile.close()		
 	return outfile.name
 
-#def create_bootstrap_permutations(nr_bs, outname, columns, column_indices):
-#	
-def calculate_sim_matrix_professional(outname, columns, method):
+def create_bootstrap_permutations(nr_bs, columns, method, headers): #enable multiprocessing here!
+	datsAlogmessage("creating " + str(nr_bs) + " bootstrap_permutations of binary character matrix (and corresponding bootstrap tree)")
+	maxlen = len(columns[0][1])
+#	print columns[0][1]
+#	print columns[0][0]
+#	print "maxlen = " + str(maxlen) 
+	permutation_trees = [] 
+	bs_index = 0
+	while bs_index < nr_bs and docontinue:
+		bs_index += 1
+		counter = 0
+		current_permutation = [[col[0], []] for col in columns]
+		while counter < maxlen:
+			rand_sample = randomnumber(0, maxlen-1)
+			for org_index in range(0, len(columns)):
+#				print len(current_permutation)
+#				print len(current_permutation[org_index][1])
+#				print len(columns)
+#				print len(columns[org_index][1])
+				current_permutation[org_index][1].append(columns[org_index][1][rand_sample])
+#				print current_permutation[org_index][0] + " --> added value: " + str(current_permutation[org_index][1])
+			counter += 1
+		sys.stdout.write("\rcalculating bootstrap tree nr " + str(bs_index) + " of " + str(nr_bs))
+		sys.stdout.flush()
+		permutation_trees.append(calculate_NJ_tree(matrix_dict_to_matrix_obj(calculate_matrix(current_permutation, method), headers)))
+	return permutation_trees
+		
+def calculate_bootstrapped_NJ_tree(ref_tree, permutation_trees):
+	from Bio.Phylo.Consensus import get_support
+	bs_tree = get_support(ref_tree, permutation_trees)
+	return bs_tree
+	
+def calculate_matrix(columns, method):
+	if method != "none" and method != "simple":
+		matrix_dict = calculate_sim_matrix_professional(columns, method)
+	elif method == "simple":
+		matrix_dict = calculate_sim_matrix_simple(columns)
+	return matrix_dict
+
+def calculate_sim_matrix_professional(columns, method):
 	try:
 		import scipy.spatial.distance as dist #check if biopythons distance calculation can be used for binary character data as well!
 	except ImportError:
 		datsANerror("SciPy (http://scipy.org/) needs to be installed to use the distance-calculation method \"" + method +"\"\nWithout this module only methods \"simple\" and \"none\" are available")
-	print "Generating similarity/distance matrices using " + method  
 	method_dict = {"braycurtis":dist.braycurtis, "canberra":dist.canberra, "cityblock":dist.cityblock, "jaccard":dist.jaccard, "euclidean":dist.euclidean}
 	matrix_dict = {}
 	for c1 in columns:
@@ -237,7 +273,7 @@ def calculate_sim_matrix_professional(outname, columns, method):
 
 def matrix_dict_to_matrix_obj(matrix_dict, headers): #headers-list is necessary to enforce original order of organisms in final matrix (dicts get all jumbled up)
 	#this function converts my square tabular matrix format to a triangular format biopython matrix object 
-	print "converting matrix_dict to biopython matrix_object" 
+#	datsAlogmessage("converting matrix_dict to biopython matrix_object")
 	from Bio.Phylo.TreeConstruction import _Matrix, _DistanceMatrix
 	matrix_type = "difference_dict"
 	matrix_list = []
@@ -253,25 +289,37 @@ def matrix_dict_to_matrix_obj(matrix_dict, headers): #headers-list is necessary 
 #	print matrix_obj
 	return matrix_obj
 
-def calculate_NJ_tree(outname, matrix_obj):
-	from Bio import Phylo
+def calculate_NJ_tree(matrix_obj):
 	from Bio.Phylo.TreeConstruction import DistanceTreeConstructor
 	constructor = DistanceTreeConstructor()
 	tree = constructor.nj(matrix_obj)
-	out_file = open(outname + ".nj.tree", "w")
-	Phylo.write(tree, out_file, "newick")
+	return tree
+
+def remove_internal_tree_labels(thistree):
+	datsAlogmessage("Removing internal node labels that do nor refer to confidence values from final tree")
+	for inode in thistree.get_nonterminals():
+		inode.name = None
+	return thistree
+
+def write_nj_tree(outname, matrix_method, bootstraps, main_tree):
+	from Bio import Phylo
+	outname += "." + matrix_method + "." + tree_method
+	if tree_method == "nj_bs":
+		outname += "." + str(bootstraps)
+	outname += ".tree.newick"
+	datsAlogmessage("writing treefile to " + outname)
+	out_file = open(outname, "w")
+	Phylo.write(main_tree, out_file, "newick")
 	out_file.close()
+	return outname
 
-
-def calculate_sim_matrix_simple(outname, columns): 
-	print "calculating simple similarity and difference matrices"
+def calculate_sim_matrix_simple(columns): 
 	#calculate a simple similarity/difference matrix based on the shared genecontent between the comparison organisms
 	#for each comparison-pair, add up all shared OGs. Then divide the sum of each pair by the number of genes in the smaller genome of each pair
 	#this provides a simple correction for genome size
 	matrix_dict = {}
 	sim_calc_dict = {}
 	for c1 in columns:
-#		print c1
 		sim_calc_dict[c1[0]] = {"total_og_count":sum(c1[1]), "shared_og_dict":{}}
 		matrix_dict[c1[0]] = {"similarity_dict":{}, "difference_dict":{}}
 		#total_og_count=tota sum of OGs in respective organism, shared_og_dict=dictionary containing numbers ogs shared with each comparison organism
@@ -282,20 +330,15 @@ def calculate_sim_matrix_simple(outname, columns):
 				if c1[1][og_index] == 1 and c2[1][og_index] == 1:
 					sum_shared += 1
 			sim_calc_dict[c1[0]]["shared_og_dict"][c2[0]] = sum_shared
-	print "===testing list==="
 	for org1 in sim_calc_dict: #now calculate the actual similarity values
-#		print org1
 		for org2 in sim_calc_dict:
-			print "test: " + org1 + " vs " + org2
-#			print " shared: " +  str(sim_matrix_dict[org1]["shared_og_dict"][org2]) + " count_org1: " + str(sim_matrix_dict[org1]["total_og_count"]) + " count_org2: " + str(sim_matrix_dict[org2]["total_og_count"]) + " min: " + str(min(sim_matrix_dict[org1]["total_og_count"], sim_matrix_dict[org2]["total_og_count"]))
 			matrix_dict[org1]["similarity_dict"][org2] = float(sim_calc_dict[org1]["shared_og_dict"][org2]) / min(sim_calc_dict[org1]["total_og_count"], sim_calc_dict[org2]["total_og_count"])
-			print "similarity = " + str(float(sim_calc_dict[org1]["shared_og_dict"][org2]) / min(sim_calc_dict[org1]["total_og_count"], sim_calc_dict[org2]["total_og_count"]))
 			matrix_dict[org1]["difference_dict"][org2] = 1 - matrix_dict[org1]["similarity_dict"][org2]
 	return matrix_dict
 
 def write_sim_dif_matrix(headers, outname, matrix_dict, matrix_method): #adapt for creating bootstraps (multiple marices in phylip format)
 	#using the headers list to arrange the organisms as in the input data (dictionaries get all jumbled up)
-	print "writing similarity and difference matrices"
+	datsAlogmessage("writing similarity and difference matrices")
 	outfilesim = open(outname + "." + matrix_method + ".sim", "w")
 	outfilediff = open(outname + "." + matrix_method + ".diff", "w")
 	firstline = ""
@@ -319,7 +362,7 @@ def write_sim_dif_matrix(headers, outname, matrix_dict, matrix_method): #adapt f
 def write_binaryalignment_fasta(outputfilename, columns):
 	outfile = open(outputfilename+".fas", "w")
 	if verbose:
-		print "producing alignment file '" + outfile.name + "' in fasta format"
+		datsAlogmessage("producing alignment file '" + outfile.name + "' in fasta format")
 	for c in columns:
 		outfile.write(">" + c[0] + "\n")
 		for line in c[1]:
@@ -331,7 +374,7 @@ def write_binaryalignment_fasta(outputfilename, columns):
 def write_binaryalignment_phylip(outputfilename, columns):
 	outfile = open(outputfilename + ".relaxed.phy","w")
 	if verbose:
-		print "producing alignment file '" + outfile.name + "' in relaxed sequential phylip format"
+		datsAlogmessage("producing alignment file '" + outfile.name + "' in relaxed sequential phylip format")
 	outfile.write(str(len(columns)) + " " + str(len(columns[0][1])))
 	for c in columns:
 		#print c[0]+c[0]
@@ -342,7 +385,7 @@ def write_binaryalignment_phylip(outputfilename, columns):
 		#print linestring
 		outfile.write(linestring)
 	outfile.close()
-	print "writing: " + outfile.name
+	datsAlogmessage("writing: " + outfile.name)
 	return outfile.name
 
 def call_raxml_rapidbs(alignmentfile, outputfilename, seed, parameters): #parameters should be a dictionary (This dictionary thing was introduced, so that the script can be more easily adapted to accept custom commandline-parameters for raxml by the user)
@@ -568,13 +611,25 @@ def main():
 			if args.outfasta and docontinue:
 				alignment_files.append(write_binaryalignment_fasta(out_file, columns))
 			if args.outdiff != "none" and docontinue:
+				datsAlogmessage("\nGenerating similarity/distance matrices using " + args.outdiff)
 				if args.outdiff == "simple":
-					matrix_dict = calculate_sim_matrix_simple(out_file, columns)
+					matrix_dict = calculate_sim_matrix_simple(columns)
 				else:
-					matrix_dict = calculate_sim_matrix_professional(out_file, columns, args.outdiff)
+					matrix_dict = calculate_sim_matrix_professional(columns, args.outdiff)
 				alignment_files.extend(write_sim_dif_matrix(headers, out_file, matrix_dict, args.outdiff))
 				matrix_obj = matrix_dict_to_matrix_obj(matrix_dict, headers)
-				calculate_NJ_tree(out_file + ".args.outdiff", matrix_obj)
+				if args.tree_method in ["nj", "nj_bs"]:
+					datsAlogmessage("inferring Neigbor Joining Base Tree")
+					main_tree = calculate_NJ_tree(matrix_obj)
+					if args.tree_method == "nj_bs" and bootstraps > 1:
+						main_tree = calculate_bootstrapped_NJ_tree(main_tree, create_bootstrap_permutations(bootstraps, columns, args.outdiff, headers))
+					main_tree = remove_internal_tree_labels(main_tree) #remove internal noda labels which are not confidence values
+					tree_files.append(write_nj_tree(out_file, args.outdiff, bootstraps, main_tree))
+					if verbose:
+						print "\nascii representation of your NJ tree (not showing confidence values):\n"
+						Bio.Phylo.draw_ascii(main_tree)
+						print "plain text version of your NJ tree object (WITH confidence values) is included in the log file"
+					datsAlogmessage("\n" + "-" * 50 + "\nplain text version of your NJ tree (with confidence values):\n" + str(main_tree) + "\n" + "-" * 50)
 			if args.outmatrix and docontinue:
 				alignment_files.append(write_binary_matrix(out_file, columns, column_indices))
 			if docontinue:
@@ -597,16 +652,16 @@ def main():
 #						treefiles.extend(call_fmix(alignment_files[-1], outfile,seed))
 			if docontinue:
 				if verbose:
-					print "================================\FINISHED!"	
-				datsAlogmessage("Created the following alignment-files:" + "\n\t-".join(alignment_files))
-				datsAlogmessage("Created the following tree-files:" + "\n\t-".join(tree_files))
+					print "\n================================\FINISHED!"	
+				datsAlogmessage("Created the following alignment-files:\n\t-" + "\n\t-".join(alignment_files))
+				datsAlogmessage("Created the following tree-files:\n\t-" + "\n\t-".join(tree_files))
 		except Exception as e:
 			datsAlogmessage(str(e))
 			for frame in traceback.extract_tb(sys.exc_info()[2]):
 				fname,lineno,fn,text = frame
 				print "Error in %s on line %d" % (fname, lineno)
 		finally:
-			datsAlogmessage("cleaning up...")
+			datsAlogmessage("\ncleaning up...")
 			for delfile in os.listdir("."):
 				if "delme_tempfile" in delfile:
 					os.remove(delfile)
