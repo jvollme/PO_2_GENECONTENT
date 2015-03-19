@@ -1,5 +1,5 @@
 #!/usr/bin/python
-#created 21.06.2014 by John Vollmers
+#created 19.03.15 by John Vollmers
 #from Bio.Phylo.TreeConstruction import * #for using the directly biopython-implemented Distance(UPGMA + NJ) and parsimony methods. Not done/necessary yet
 import os, sys, argparse, time, multiprocessing, random, traceback, Bio
 from Bio import AlignIO, SeqIO
@@ -20,19 +20,12 @@ myparser.add_argument("-t", "--threads", action = "store", dest = "nthreads", ty
 myparser.add_argument("-sd", "--seed", action = "store", dest = "seed_nr", type = int, default = 0, help = "Integer to provide as seed for RAxML or PhyML\n0=seed generated randomly\nDefault=random seed")
 myparser.add_argument("-mt", "--make_tree", action = "store", dest = "tree_method", choices = ["raxml", "raxml_bs", "raxml_rapidbs", "nj", "nj_bs", "none"], default = "none", help = "Generate ML phylogenetic trees using RAxML with \"new rapid hill climbing\"\nand substitution model: \"BINGAMMA\"\n\t-\"raxml\": single tree without bootstraps (using new rapid hill climbing)\n\t-\"raxml_bs\": thorough bootstrap analyses and search for best ML tree\n\t-\"raxml_rapidbs\": rapid bootstrap analyses and search for best ML tree\n\t in one run\n\t-\"nj\": Neighbor joining\n\t-\"none\"\nDefault=none")
 myparser.add_argument("-tbp","--tree_builder_path", action="store", dest = "treebuilder_path", default = "", help = "Path to treebuilder (currently only raxml supported) if not listed in $PATH")
-#myparser.add_argument("--raxml", action="store_true", dest="raxml", default=False, help="Generate ML phylogenetic tree without bootstrap values using RAxML and \"new rapid hill climbing\" and substitution model: \"BINGAMMA\"\nDefault=don't use")
-#myparser.add_argument("--raxml_bs", action="store_true", dest="raxml_BS", default=False, help="Generate ML phylogenetic tree with thorough bootstrap analyses and search for best ML tree using RAxML and \"new rapid hill climbing\" and substitution model: \"BINGAMMA\"'\nDefault: don't use")
-#myparser.add_argument("--raxml_rapidbs", action="store_true", dest="raxml_rapidBS", default=False, help="Generate ML phylogenetic tree with rapid bootstrap analyses and search for best ML tree in one run using RAxML and substitution model: \"BINGAMMA\"\nDefault: don't use")
-#myparser.add_argument("--pars", action="store_true", dest="fpars", default=False, help="Generate Parsimony phylogenetic tree using fpars (the EMBOSS implementation of the PHYLIP tool)\nDefault: don't use")
-#myparser.add_argument("--mix", action="store_true", dest="fmix", default=False, help="Generate Parsimony phylogenetic tree using fmix with wagner parsimony (the EMBOSS implementation of the PHYLIP tool)\nDefault=don't use")
-#myparser.add_argument("--dollop", action="store_true", dest="fdollop", default=False, help="Generate Parsimony phyogenetic trees using fdollop and Dollo Parsimony (the EMBOSS implementation of the PHYLIP tool)\n Default=don't use")
 myparser.add_argument("-bs", "--bootstraps", action = "store", dest = "bootstraps", type = int, default = 1000, help = "Number of times to resample for bootstrapping\nonly bootstrapped trees will be produced, not the permutated data matrices")
 myparser.add_argument("--min_freq", action = "store", dest = "min_freq", type=int, default = 2, help = "Minimum frequency for Orthologeous Groups across all comparison-organisms\nfor Group to be considered in Analyses\nDefault=2 (exclude all singletons)\nRecommended when working with highly fragmented genomes or dubious ORF-finding")
 #myparser.add_argument("--ignore_columns", action="store", dest="ignore_column_list", default=None, help="indexes (starting with 1) of Organisms to be ignored when counting frequencies of Orthologeous Groups (Tip: ignore all but one representative member of overrepresented species/strains)")
-#implement bootsrapped versions of pars, mix and dollop soon
 args = myparser.parse_args()
 
-version = "v0.5"
+version = "v0.6"
 OG_number = 0
 available_cores = multiprocessing.cpu_count() #counts how many cores are available, to check if the user-argument for threads can be fulfilled
 wstrings, estrings, lstrings = [], [], [] #warning, error and log messages respectively
@@ -44,7 +37,6 @@ raxml_prog = "raxmlHPC"
 logfilename = out_file + "_PO_2_GENECONTENT_" + time.strftime("%Y%m%d%H%M%S") + ".log"
 verbose = True
 docontinue = True
-
 
 def randomnumber(min, max):
 	#returns a random integer to use as seed for rxml and pyml
@@ -221,9 +213,6 @@ def write_binary_matrix(outname, columns, column_indices):
 def create_bootstrap_permutations(nr_bs, columns, method, headers): #enable multiprocessing here!
 	datsAlogmessage("creating " + str(nr_bs) + " bootstrap_permutations of binary character matrix (and corresponding bootstrap tree)")
 	maxlen = len(columns[0][1])
-#	print columns[0][1]
-#	print columns[0][0]
-#	print "maxlen = " + str(maxlen) 
 	permutation_trees = [] 
 	bs_index = 0
 	while bs_index < nr_bs and docontinue:
@@ -233,12 +222,7 @@ def create_bootstrap_permutations(nr_bs, columns, method, headers): #enable mult
 		while counter < maxlen:
 			rand_sample = randomnumber(0, maxlen-1)
 			for org_index in range(0, len(columns)):
-#				print len(current_permutation)
-#				print len(current_permutation[org_index][1])
-#				print len(columns)
-#				print len(columns[org_index][1])
 				current_permutation[org_index][1].append(columns[org_index][1][rand_sample])
-#				print current_permutation[org_index][0] + " --> added value: " + str(current_permutation[org_index][1])
 			counter += 1
 		sys.stdout.write("\rcalculating bootstrap tree nr " + str(bs_index) + " of " + str(nr_bs))
 		sys.stdout.flush()
@@ -505,82 +489,6 @@ def relaxed_2_strict_phylip(input_file, output_file): #create library with uniqe
 		datsAwarning("Could not convert relaxed phylip format to strict phylip format!\nPHYLIP based programs (fpar, fdollop, fmix) can NOT be used!")
 		return None
 		
-def call_fpars(alignmentfile, out_file, seed):
-	#input should be a temporal "strict" phylip file, NOT the relaxed phylip file that is normally generated!
-	#important: first you have to generate a temporal strict phylip file with 10-character placeholders for each name (stored as a dict).
-	#use this temporal input file as input for fpars
-	#then read in the outputfiles of fpars and translate the names back into the original names (->convert back to relaxed phylip file)
-	#but do this outside of this method in order to enable to use the seqboot and condense tools also
-	#UPDATE: it appears the use of discrete (binary) characters is NOT possible in Fseqboot.
-	datsAlogmessage("calculating phylogeny: Discrete character parsimony using fpars (EMBOSS implementation of the PHYLIP package)")
-	fpars_args=['-infile '+alignmentfile, '-outfile '+out_file+"_fpars.log", '-auto', "-seed "+str(seed)]
-	fpars_command=["fpars"]+fpars_args
-	datsAlogmessage("-->"+" ".join(fpars_args))
-	try:
-		call(fpars_command)
-		datsAlogmessage("-->SUCCESS")
-		#the output will be a logfile named "<output>.log" and a treefile named "strict.treefile" (because the inputfilename will be automatically concatenated to "strict.")
-		#therefore rename the treefile:
-		os.rename("strict.treefile",out_file + "_fpars.treefile")
-		return [out_file + "_fpars.log", out_file + "_fpars.treefile"]
-	except Exception as e:
-		datsAlogmessage("-->FAILURE")
-		datsAwarning("WARNING: Discrete character parsimony using fpars failed!\n\t" + str(e))
-		return None
-
-def call_fmix(alignmentfile, out_file, seed):
-	#input should be a temporal "strict" phylip file, NOT the relaxed phylip file that is normally generated!
-	#important: first you have to generate a temporal strict phylip file with 10-character placeholders for each name (stored as a dict).
-	#use this temporal input file as input for fmix
-	#then read in the outputfiles of fpars and translate the names back into the original names (->convert back to relaxed phylip file)
-	#but do this outside of this method in order to enable to use the seqboot and condense tools also
-	#UPDATE: it appears the use of discrete (binary) characters is NOT possible in Fseqboot.
-	datsAlogmessage("calculating phylogeny: Discrete character parsimony using fmix with wagner parsimony (EMBOSS implementation of the PHYLIP package)")
-	fpmix_args=['-infile ' + alignmentfile, '-outfile ' + out_file + "_fmix.log", "-method w", '-auto', "-seed " + str(seed)]
-	fmix_command=["fmix"] + fmix_args
-	datsAlogmessage("-->" + " ".join(fpars_args))
-	try:
-		call(fmix_command)
-		datsAlogmessage("-->SUCCESS")
-		#the output will be a logfile named "<output>.log" and a treefile named "strict.treefile" (because the inputfilename will be automatically concatenated to "strict.")
-		#therefore rename the treefile:
-		os.rename("strict.treefile",out_file+"_fmix.treefile")
-		return [out_file+"_fmix.log", out_file+"_fmix.treefile"]
-	except Exception as e:
-		datsAlogmessage("-->FAILURE")
-		datsAwarning("WARNING: Discrete character parsimony using fmix failed!\n\t"+str(e))
-		return None
-	
-
-def call_fdollop(alignmentfile, out_file, seed):
-	#input should be a temporal "strict" phylip file, NOT the relaxed phylip file that is normally generated!
-	#important: first you have to generate a temporal strict phylip file with 10-character placeholders for each name (stored as a dict).
-	#use this temporal input file as input for fmix
-	#then read in the outputfiles of fpars and translate the names back into the original names (->convert back to relaxed phylip file)
-	#but do this outside of this method in order to enable to use the seqboot and condense tools also
-	#UPDATE: it appears the use of discrete (binary) characters is NOT possible in Fseqboot.
-	datsAlogmessage("calculating phylogeny: Discrete character parsimony using fdollop with dollo parsimony (EMBOSS implementation of the PHYLIP package)")
-	fpmix_args=['-infile '+alignmentfile, '-outfile '+out_file+"_fdollop.log", "-method d", '-auto', "-seed "+str(seed)]
-	fmix_command=["fdollop"]+fmix_args
-	datsAlogmessage("-->"+" ".join(fpars_args))
-	try:
-		call(fmix_command)
-		datsAlogmessage("-->SUCCESS")
-		#the output will be a logfile named "<output>.log" and a treefile named "strict.treefile" (because the inputfilename will be automatically concatenated to "strict.")
-		#therefore rename the treefile:
-		os.rename("strict.treefile",out_file+"_fdollop.treefile")
-		return [out_file+"_fdollop.log", out_file+"_fdollop.treefile"]
-	except Exception as e:
-		datsAlogmessage("-->FAILURE")
-		datsAwarning("WARNING: Discrete character parsimony using fdollop failed!\n\t"+str(e))
-		return None
-	#call function to convert indexed names in treefile to original names (could be done by calling "sed -i" on the resultfiles)
-	#must convert treefile to other filename and return that filename
-	#return something
-	
-def call_phyml():
-	# implement phylip tools (neighborjoining etc) for distance based tree inference (phylip neighbor etc)
-	pass
 
 def write_logfile(logfilename):
 	logfile = open(logfilename,'w')
@@ -629,7 +537,7 @@ def main():
 						print "\nascii representation of your NJ tree (not showing confidence values):\n"
 						Bio.Phylo.draw_ascii(main_tree)
 						print "plain text version of your NJ tree object (WITH confidence values) is included in the log file"
-					datsAlogmessage("\n" + "-" * 50 + "\nplain text version of your NJ tree (with confidence values):\n" + str(main_tree) + "\n" + "-" * 50)
+					lstrings.append("\n" + "-" * 50 + "\nplain text version of your NJ tree (with confidence values):\n" + str(main_tree) + "\n" + "-" * 50)
 			if args.outmatrix and docontinue:
 				alignment_files.append(write_binary_matrix(out_file, columns, column_indices))
 			if docontinue:
@@ -641,15 +549,6 @@ def main():
 			elif tree_method == "raxml" and docontinue:
 				print "number of alignmentfiles: " + str(len(alignment_files))
 				tree_files.extend(call_raxml_nobs(alignment_files[-1], out_file, seed, {"-T":nthreads}))
-#			elif args.fpars or args.fmix or args.fdollop and docontinue: #remove this sometime
-#				alignment_files.append(relaxed_2_strict_phylip(alignment_files[-1], alignment_files[-1].replace(".relaxed.", ".strict.")))
-#				if alignment_files[-1]!=None:
-#					if args.fpars:
-#						treefiles.extend(call_fpars(alignment_files[-1], outfile, seed))
-#					if args.fdollop:
-#						treefiles.extend(call_fdollop(alignment_files[-1], outfile, seed))
-#					if args.fmix:
-#						treefiles.extend(call_fmix(alignment_files[-1], outfile,seed))
 			if docontinue:
 				if verbose:
 					print "\n================================\FINISHED!"	
