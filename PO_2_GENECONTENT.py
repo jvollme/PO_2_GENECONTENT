@@ -1,5 +1,5 @@
 #!/usr/bin/python
-#created 19.03.15 by John Vollmers
+#created 20.03.15 by John Vollmers
 #from Bio.Phylo.TreeConstruction import * #for using the directly biopython-implemented Distance(UPGMA + NJ) and parsimony methods. Not done/necessary yet
 import os, sys, argparse, time, multiprocessing, random, traceback, Bio
 from Bio import AlignIO, SeqIO
@@ -16,7 +16,7 @@ myparser.add_argument("-o", "--out", action = "store", dest="out_file", default 
 myparser.add_argument("-ofas", "--out_fasta", action = "store_true", dest = "outfasta", default = False, help = "Create a file with the aligned discrete binary character data in Fasta format\n(in addition to the default phylip file)")
 myparser.add_argument("-omat", "--out_matrix", action = "store_true", dest = "outmatrix", default = False, help = "Create a file with the aligned discrete character data in tabular format\n(in addition to the default phylip file)")
 myparser.add_argument("-odiff", action = "store", dest = "outdiff", choices = ["simple", "none", "braycurtis", "canberra", "cityblock", "jaccard", "euclidean"], default = "simple", help = "Create difference/similarity matrixes for distance matrix based phylogeny inference.\n\t- simple : Simple normalized distance matrix\n\t  (distance=Nr shared OGs/total Nr OGs in SMALLER organism)\n\t- braycurtis : Bray-Curtis distance\n\t- canberra : Canberra distance\n\t- cityblock : Manhatten distance\n\t- euclidean : Euclidean distance\n\t- jaccard : Jaccard-Needham dissimilarity\nDefault: \"simple\"") #only simply algorithm implemented for now. Add more complex methods and bootstrapping options
-myparser.add_argument("-t", "--threads", action = "store", dest = "nthreads", type = int, default = 4, help = "Number of cpus to use\nDefault=4 (or maximum number of available cores, if less than 4 cores available)")
+myparser.add_argument("-cpu", "--cpu", action = "store", dest = "ncpus", type = int, default = 4, help = "Number of cpus to use\nDefault=4 (or maximum number of available cores, if less than 4 cores available)")
 myparser.add_argument("-sd", "--seed", action = "store", dest = "seed_nr", type = int, default = 0, help = "Integer to provide as seed for RAxML or PhyML\n0=seed generated randomly\nDefault=random seed")
 myparser.add_argument("-mt", "--make_tree", action = "store", dest = "tree_method", choices = ["raxml", "raxml_bs", "raxml_rapidbs", "nj", "nj_bs", "none"], default = "none", help = "Generate ML phylogenetic trees using RAxML with \"new rapid hill climbing\"\nand substitution model: \"BINGAMMA\"\n\t-\"raxml\": single tree without bootstraps (using new rapid hill climbing)\n\t-\"raxml_bs\": thorough bootstrap analyses and search for best ML tree\n\t-\"raxml_rapidbs\": rapid bootstrap analyses and search for best ML tree\n\t in one run\n\t-\"nj\": Neighbor joining\n\t-\"none\"\nDefault=none")
 myparser.add_argument("-tbp","--tree_builder_path", action="store", dest = "treebuilder_path", default = "", help = "Path to treebuilder (currently only raxml supported) if not listed in $PATH")
@@ -25,12 +25,12 @@ myparser.add_argument("--min_freq", action = "store", dest = "min_freq", type=in
 #myparser.add_argument("--ignore_columns", action="store", dest="ignore_column_list", default=None, help="indexes (starting with 1) of Organisms to be ignored when counting frequencies of Orthologeous Groups (Tip: ignore all but one representative member of overrepresented species/strains)")
 args = myparser.parse_args()
 
-version = "v0.6"
+version = "v0.7"
 OG_number = 0
-available_cores = multiprocessing.cpu_count() #counts how many cores are available, to check if the user-argument for threads can be fulfilled
+available_cores = multiprocessing.cpu_count() #counts how many cores are available, to check if the user-argument for cpus can be fulfilled
 wstrings, estrings, lstrings = [], [], [] #warning, error and log messages respectively
 out_file, PO_file=args.out_file + "_" + time.strftime("%Y%m%d%H%M%S"), args.po_resultfile
-nthreads, seed, bootstraps = args.nthreads, args.seed_nr, args.bootstraps
+ncpus, seed, bootstraps = args.ncpus, args.seed_nr, args.bootstraps
 tree_method, treebuilder_path = args.tree_method, args.treebuilder_path
 min_freq = args.min_freq
 raxml_prog = "raxmlHPC"
@@ -44,15 +44,15 @@ def randomnumber(min, max):
 	return random.randint(min,max)
 
 def checkargs(args):
-	global verbose, nthreads, seed, bootstraps, tree_method, raxml_prog
-	global nthreads
+	global verbose, ncpus, seed, bootstraps, tree_method, raxml_prog
+	global ncpus
 	if args.no_verbose:
 		verbose = False
 	if not os.path.exists(PO_file) or not os.path.isfile(PO_file):
 		datsANerror("ERROR: cannot find proteinortho-resultfile: " + PO_file)
-	if available_cores<nthreads:
-		datsAwarning("WARNING: less than " + str(nthreads) + " cores/threads available! Setting nthreads to " + str(available_cores))
-		nthreads = available_cores
+	if available_cores<ncpus:
+		datsAwarning("WARNING: less than " + str(ncpus) + " cores/threads available! Setting number of cpus to " + str(available_cores))
+		ncpus = available_cores
 		
 	if seed == 0 and "raxml" in tree_method:
 		seed = randomnumber(1, 2000)
@@ -90,7 +90,7 @@ def checkargs(args):
 				except:
 					datsAwarning("Warning: This script was devised for and tested with RAxML v8.0.20.\n\tNot sure which version of RAxML you're using, but it sure as hell isn't v7 or v8!\n\tThis may very well still work, but if it doesn't it's YOUR fault!")
 		elif os.path.exists(treebuilder_path) and os.path.isfile(treebuilder_path):
-			if nthreads > 1 and not "PTHREADS" in treebuilder_path:
+			if ncpus > 1 and not "PTHREADS" in treebuilder_path:
 				datsAwarning("Warning: multithreading is only supported with 'PTHREADS'-versions of raxml. Not sure if your choosen binaries support this.\t\nif raxml calculations fail, recombile raxml with 'PTHREADS'-option") 
 			try:
 				checkraxml_cline = RaxmlCommandline(version = True)
@@ -103,22 +103,21 @@ def checkargs(args):
 				raxml_prog=treebuilder_path
 			except:
 				datsAwarning("Warning: Correct raxML-version not found under " + treebuilder_path + "!\nWill NOT calculate ML trees!")
-				tree_method = "none" 	#Add checks for dollop, mix and pars later
-	#as soon as bootstrapping works with those tools, also add check for numpy v>7
-	
-def which(file):
-	#locate scripts and programs in PATH
-    for path in os.environ["PATH"].split(":"):
-        if os.path.exists(path + "/" + file):
-                return path + "/" + file
-    return None
+				tree_method = "none" 
+
+def which(afile):
+#locate scripts and programs in PATH
+	for path in os.environ["PATH"].split(":"):
+		if os.path.exists(path + "/" + afile):
+			return path + "/" + afile
+	return None
 
 def datsAwarning(wstring):
 	global wstrings
 	wstrings.append(wstring)
 	if verbose:
 		print "\n" + wstring + "\n"
-	
+
 def datsANerror(estring):
 	global estrings
 	global docontinue
@@ -195,7 +194,7 @@ def filter_OGs_by_freq(minfreq, columns, column_indices):
 			line_index+=1 #check next line, if this one is ok
 	datsAlogmessage("\n" + str(len(columns[0][1])) + " OGs remaining after filtering")
 	return columns, column_indices
-	
+
 def write_binary_matrix(outname, columns, column_indices):
 	outfile = open(outname + ".tab", "w")
 	headerstring = "OG"							#headerline
@@ -210,30 +209,53 @@ def write_binary_matrix(outname, columns, column_indices):
 	outfile.close()		
 	return outfile.name
 
-def create_bootstrap_permutations(nr_bs, columns, method, headers): #enable multiprocessing here!
-	datsAlogmessage("creating " + str(nr_bs) + " bootstrap_permutations of binary character matrix (and corresponding bootstrap tree)")
+def make_single_bootstrap_tree(columns, maxlen, method, headers, mp_output):
+	current_permutation = [[col[0], []] for col in columns]
+	for c in range(maxlen):
+		rand_sample = randomnumber(0, maxlen-1)
+		for org_index in range(0, len(columns)):
+			current_permutation[org_index][1].append(columns[org_index][1][rand_sample])
+	current_permutation_matrix_obj = matrix_dict_to_matrix_obj(calculate_matrix(current_permutation, method), headers)
+	current_permutation_tree = calculate_NJ_tree(current_permutation_matrix_obj)
+	mp_output.put(current_permutation_tree)
+
+def create_bootstrap_permutations(columns, method, headers): #enable multiprocessing here!
+	datsAlogmessage("creating " + str(bootstraps) + " bootstrap_permutations of binary character matrix (and corresponding bootstrap tree)\nusing " + str(ncpus) + " cpus")
+	full_thread_mp_groups = bootstraps // ncpus
+	remaining_mp_group_threads = bootstraps % ncpus
 	maxlen = len(columns[0][1])
-	permutation_trees = [] 
+	permutation_tree_list = [] 
 	bs_index = 0
-	while bs_index < nr_bs and docontinue:
-		bs_index += 1
-		counter = 0
-		current_permutation = [[col[0], []] for col in columns]
-		while counter < maxlen:
-			rand_sample = randomnumber(0, maxlen-1)
-			for org_index in range(0, len(columns)):
-				current_permutation[org_index][1].append(columns[org_index][1][rand_sample])
-			counter += 1
-		sys.stdout.write("\rcalculating bootstrap tree nr " + str(bs_index) + " of " + str(nr_bs))
+	for mp_group in range(full_thread_mp_groups):
+		permutation_tree_list.extend(run_multiprocess_group(columns, method, headers, ncpus))
+		sys.stdout.write("\rcreated " + str(len(permutation_tree_list)) + " of " + str(bootstraps) + " bootstrap permutations")
 		sys.stdout.flush()
-		permutation_trees.append(calculate_NJ_tree(matrix_dict_to_matrix_obj(calculate_matrix(current_permutation, method), headers)))
-	return permutation_trees
-		
+	if remaining_mp_group_threads > 0:
+		permutation_tree_list.extend(run_multiprocess_group(columns, method, headers, remaining_mp_group_threads))
+		sys.stdout.write("\rcreated " + str(len(permutation_tree_list)) + " of " + str(bootstraps) + " bootstrap permutations")
+		sys.stdout.flush()
+	return permutation_tree_list
+
+def run_multiprocess_group(columns, method, headers, cpus): #must start working with classes to avoid such long argument lists
+	if __name__ == '__main__': #just making sure nothing can be broken by accident
+		maxlen = len(columns[0][1])
+		group_results = []
+		mp_output = multiprocessing.Queue()
+		processes = [multiprocessing.Process(target=make_single_bootstrap_tree, args=(columns, maxlen, method, headers, mp_output)) for x in range(cpus)]
+		for p in processes:
+			p.start()
+		for p in processes:
+			p.join()
+		group_results = [mp_output.get() for p in processes]
+		return group_results
+	else:
+		datsANerror("ERROR: FORBIDDEN TO CALL THIS (MULTIPROCESSING) FUNCTION FROM AN EXTERNAL MODULE\n-->ABORTING")
+
 def calculate_bootstrapped_NJ_tree(ref_tree, permutation_trees):
 	from Bio.Phylo.Consensus import get_support
 	bs_tree = get_support(ref_tree, permutation_trees)
 	return bs_tree
-	
+
 def calculate_matrix(columns, method):
 	if method != "none" and method != "simple":
 		matrix_dict = calculate_sim_matrix_professional(columns, method)
@@ -270,7 +292,6 @@ def matrix_dict_to_matrix_obj(matrix_dict, headers): #headers-list is necessary 
 			matrix_list[indexa].append(matrix_dict[org1][matrix_type][org2])
 			indexb += 1
 	matrix_obj = _DistanceMatrix(headers, matrix_list)
-#	print matrix_obj
 	return matrix_obj
 
 def calculate_NJ_tree(matrix_obj):
@@ -280,7 +301,7 @@ def calculate_NJ_tree(matrix_obj):
 	return tree
 
 def remove_internal_tree_labels(thistree):
-	datsAlogmessage("Removing internal node labels that do nor refer to confidence values from final tree")
+	datsAlogmessage("\nRemoving internal node labels that do nor refer to confidence values from final tree")
 	for inode in thistree.get_nonterminals():
 		inode.name = None
 	return thistree
@@ -354,7 +375,7 @@ def write_binaryalignment_fasta(outputfilename, columns):
 		outfile.write("\n")
 	outfile.close()
 	return outfile.name
-	
+
 def write_binaryalignment_phylip(outputfilename, columns):
 	outfile = open(outputfilename + ".relaxed.phy","w")
 	if verbose:
@@ -398,7 +419,7 @@ def call_raxml_rapidbs(alignmentfile, outputfilename, seed, parameters): #parame
 		datsAwarning("WARNING: rapid bootstrap analyses and search for best-scoring ML tree using raxmlHPC has failed!\n\t" + str(e))	
 		return None
 	return outputfiles
-				
+
 def call_raxml_bs(alignmentfile, outputfilename, seed, parameters):
 	nr_threads = 4
 	if "-T" in parameters:
@@ -473,23 +494,6 @@ def call_raxml_nobs(alignmentfile, outputfilename, seed, parameters):
 		return None
 	return outputfiles
 
-def relaxed_2_strict_phylip(input_file, output_file): #create library with uniqe 10 character names
-	datsAlogmessage("converting relaxed phylip format ('"+input_file+"') to strict sequential phylip format('" + output_file + "')")
-	datsAlogmessage("CAREFUL: Names will be shortened to 10 characters! This may affect branch labeling!")
-	try:
-		relaxed_file = open(input_file, "r")
-		relaxed_align = AlignIO.read(relaxed_file, "phylip-relaxed")
-		relaxed_file.close()
-		strict_file = open(output_file, "w")
-		AlignIO.write(relaxed_align, "phylip-sequential")
-		strict_file.close()
-		return outputfile
-	except Exception as e:
-		datsAlogmessage("-->FAILED")
-		datsAwarning("Could not convert relaxed phylip format to strict phylip format!\nPHYLIP based programs (fpar, fdollop, fmix) can NOT be used!")
-		return None
-		
-
 def write_logfile(logfilename):
 	logfile = open(logfilename,'w')
 	logfile.write("PO_2_GENECONTENT.py logfile")
@@ -527,10 +531,11 @@ def main():
 				alignment_files.extend(write_sim_dif_matrix(headers, out_file, matrix_dict, args.outdiff))
 				matrix_obj = matrix_dict_to_matrix_obj(matrix_dict, headers)
 				if args.tree_method in ["nj", "nj_bs"]:
-					datsAlogmessage("inferring Neigbor Joining Base Tree")
+					datsAlogmessage("inferring Neigbor Joining base tree")
 					main_tree = calculate_NJ_tree(matrix_obj)
 					if args.tree_method == "nj_bs" and bootstraps > 1:
-						main_tree = calculate_bootstrapped_NJ_tree(main_tree, create_bootstrap_permutations(bootstraps, columns, args.outdiff, headers))
+						datsAlogmessage("inferring Neigbor Joining bootstrapped tree")
+						main_tree = calculate_bootstrapped_NJ_tree(main_tree, create_bootstrap_permutations(columns, args.outdiff, headers))
 					main_tree = remove_internal_tree_labels(main_tree) #remove internal noda labels which are not confidence values
 					tree_files.append(write_nj_tree(out_file, args.outdiff, bootstraps, main_tree))
 					if verbose:
@@ -543,12 +548,12 @@ def main():
 			if docontinue:
 				alignment_files.append(write_binaryalignment_phylip(out_file, columns))
 			if tree_method == "raxml_rapidbs" and docontinue:
-				tree_files.extend(call_raxml_rapidbs(alignment_files[-1], out_file, seed, {"-N":bootstraps, "-T":nthreads}))
+				tree_files.extend(call_raxml_rapidbs(alignment_files[-1], out_file, seed, {"-N":bootstraps, "-T":ncpus}))
 			elif tree_method == "raxml_bs" and docontinue:
-				tree_files.extend(call_raxml_bs(alignment_files[-1], out_file, seed, {"-N":bootstraps, "-T":nthreads}))
+				tree_files.extend(call_raxml_bs(alignment_files[-1], out_file, seed, {"-N":bootstraps, "-T":ncpus}))
 			elif tree_method == "raxml" and docontinue:
 				print "number of alignmentfiles: " + str(len(alignment_files))
-				tree_files.extend(call_raxml_nobs(alignment_files[-1], out_file, seed, {"-T":nthreads}))
+				tree_files.extend(call_raxml_nobs(alignment_files[-1], out_file, seed, {"-T":ncpus}))
 			if docontinue:
 				if verbose:
 					print "\n================================\FINISHED!"	
