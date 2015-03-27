@@ -65,11 +65,11 @@ def randomnumber(min, max):
 	random.seed()
 	return random.randint(min,max)
 
-def checkargs(args):
+def checkargs():
 	mylogger.debug("checkargs(%s)" %(args,))
 	global verbose, ncpus, seed, bootstraps, tree_method, raxml_prog
 	global ncpus
-	global.args
+	global args
 #	if args.no_verbose:
 #		verbose = False
 	if not os.path.exists(PO_file) or not os.path.isfile(PO_file):
@@ -520,7 +520,7 @@ def main():
 	if not args.no_verbose:
 		mylogger.info("\n ==PO_2_GENECONTENT.py %s by John Vollmers==\n" % version)
 	try:
-		checkargs(args)
+		checkargs()
 	except IOError as e:
 		for frame in traceback.extract_tb(sys.exc_info()[2]):
 			fname,lineno,fn,text = frame
