@@ -35,7 +35,7 @@ ncpus, seed, bootstraps = args.ncpus, args.seed_nr, args.bootstraps
 tree_method, treebuilder_path = args.tree_method, args.treebuilder_path
 min_freq = args.min_freq
 raxml_prog = "raxmlHPC"
-logfilename = out_file + "_PO_2_GENECONTENT_" + time.strftime("%Y%m%d%H%M%S") + ".log"
+logfilename = out_file + "_PO_2_GENECONTENT_" + ".log"
 #verbose = True
 docontinue = True
 
@@ -66,10 +66,10 @@ def randomnumber(min, max):
 	return random.randint(min,max)
 
 def checkargs():
+	global args
 	mylogger.debug("checkargs(%s)" %(args,))
 	global verbose, ncpus, seed, bootstraps, tree_method, raxml_prog
 	global ncpus
-	global args
 #	if args.no_verbose:
 #		verbose = False
 	if not os.path.exists(PO_file) or not os.path.isfile(PO_file):
@@ -447,7 +447,7 @@ def call_raxml_bs(alignmentfile, outputfilename, seed, parameters):
 	elif "-#" in parameters:
 		bootstraps = parameters["-#"]
 	mylogger.info("Calculating phylogenies: Thorough bootstrap analyses with raxml")
-		
+
 	mylogger.info("\tDetermining best ML tree of 20 raxmlHPC runs") 
 	#try:
 	raxml_cline = RaxmlCommandline(raxml_prog, model = "BINGAMMA", name = "best_delme_tempfile", parsimony_seed = seed, num_replicates = 20, sequences = alignmentfile, threads = nr_threads) 
@@ -459,7 +459,7 @@ def call_raxml_bs(alignmentfile, outputfilename, seed, parameters):
 	#	mylogger.info("\t--FAILURE")
 	#	mylogger.warning("WARNING: thorough bootstrap analyses using raxmlHPC failed!\n\t"+str(e))
 	#	return None
-	
+
 	mylogger.info("\tDoing bootstrap analyses with %s runs using raxmlHPC" % bootstraps)
 	#try:
 	raxml_cline = RaxmlCommandline(raxml_prog, model = "BINGAMMA", sequences = alignmentfile, name = "boot_delme_tempfile", parsimony_seed = seed, bootstrap_seed = seed, num_replicates = bootstraps, threads = nr_threads)
@@ -517,10 +517,58 @@ mylogger = setlogger(logfilename)
 def main():
 	alignment_files = []
 	tree_files = []
-	if not args.no_verbose:
-		mylogger.info("\n ==PO_2_GENECONTENT.py %s by John Vollmers==\n" % version)
+	mylogger.info("\n ==PO_2_GENECONTENT.py %s by John Vollmers==\n" % version)
+
 	try:
 		checkargs()
+		headers, columns, OG_number, column_indices = read_PO_file(PO_file)
+
+		if min_freq > 1:
+			columns, column_indices = filter_OGs_by_freq(min_freq, columns, column_indices)
+		if args.outfasta:
+			alignment_files.append(write_binaryalignment_fasta(out_file, columns))
+
+		if args.outdiff != "none":
+			mylogger.info("\nGenerating similarity/distance matrices using %s" % args.outdiff)
+			if args.outdiff == "simple":
+				matrix_dict = calculate_sim_matrix_simple(columns)
+			else:
+				matrix_dict = calculate_sim_matrix_professional(columns, args.outdiff)
+
+			alignment_files.extend(write_sim_dif_matrix(headers, out_file, matrix_dict, args.outdiff))
+			matrix_obj = matrix_dict_to_matrix_obj(matrix_dict, headers)
+
+			if args.tree_method in ["nj", "nj_bs"]:
+				mylogger.info("inferring Neigbor Joining base tree")
+				main_tree = calculate_NJ_tree(matrix_obj)
+				if args.tree_method == "nj_bs" and bootstraps > 1:
+					mylogger.info("inferring Neigbor Joining bootstrapped tree")
+					main_tree = calculate_bootstrapped_NJ_tree(main_tree, create_bootstrap_permutations(columns, args.outdiff, headers))
+				main_tree = remove_internal_tree_labels(main_tree) #remove internal noda labels which are not confidence values
+				tree_files.append(write_nj_tree(out_file, args.outdiff, bootstraps, main_tree))
+				if not args.no_verbose:
+					print "\nascii representation of your NJ tree (not showing confidence values):\n"
+					Bio.Phylo.draw_ascii(main_tree)
+					print "plain text version of your NJ tree object (WITH confidence values) is included in the log file"
+				lstrings.append("\n" + "-" * 50 + "\nplain text version of your NJ tree (with confidence values):\n" + str(main_tree) + "\n" + "-" * 50)
+
+		if args.outmatrix:
+			alignment_files.append(write_binary_matrix(out_file, columns, column_indices))
+		alignment_files.append(write_binaryalignment_phylip(out_file, columns))
+
+		if tree_method == "raxml_rapidbs":
+			tree_files.extend(call_raxml_rapidbs(alignment_files[-1], out_file, seed, {"-N":bootstraps, "-T":ncpus}))
+		elif tree_method == "raxml_bs":
+			tree_files.extend(call_raxml_bs(alignment_files[-1], out_file, seed, {"-N":bootstraps, "-T":ncpus}))
+		elif tree_method == "raxml":
+			print "number of alignmentfiles: %s" % len(alignment_files)
+			tree_files.extend(call_raxml_nobs(alignment_files[-1], out_file, seed, {"-T":ncpus}))
+
+		if not args.no_verbose:
+			print "\n================================\FINISHED!"
+		mylogger.info("Created the following alignment-files:\n\t-" + "\n\t-".join(alignment_files))
+		mylogger.info("Created the following tree-files:\n\t-" + "\n\t-".join(tree_files))
+
 	except IOError as e:
 		for frame in traceback.extract_tb(sys.exc_info()[2]):
 			fname,lineno,fn,text = frame
@@ -528,6 +576,7 @@ def main():
 		mylogger.error("Error in %s on line %d :> %s" % (fname, lineno, text))
 		mylogger.error(str(e))
 		mylogger.error("One or more Inputfiles could not be found")
+
 	except OSError as e:
 		for frame in traceback.extract_tb(sys.exc_info()[2]):
 			fname,lineno,fn,text = frame
@@ -535,73 +584,24 @@ def main():
 		mylogger.error("Error in %s on line %d :> %s" % (fname, lineno, text))
 		mylogger.error(str(e))
 		mylogger.error("One or more external dependancies for the specified workflow could not be found")
+
 	except Exception as e:
 		for frame in traceback.extract_tb(sys.exc_info()[2]):
 			fname,lineno,fn,text = frame
 			#print "Error in %s on line %d :> %text" % (fname, lineno, text)
-		mylogger.error("Error in %s on line %d :> %s" % (fname, lineno, text))
+		mylogger.error("Error in %s, %s, on line %d :> %s" % (fname, fn, lineno, text))
 		mylogger.error(str(e))
-	if docontinue:
-		try:
-			headers, columns, OG_number , column_indices = read_PO_file(PO_file)
-			if min_freq > 1:
-				columns, column_indices = filter_OGs_by_freq(min_freq, columns, column_indices)
-			if args.outfasta and docontinue:
-				alignment_files.append(write_binaryalignment_fasta(out_file, columns))
-			if args.outdiff != "none" and docontinue:
-				mylogger.info("\nGenerating similarity/distance matrices using %s" % args.outdiff)
-				if args.outdiff == "simple":
-					matrix_dict = calculate_sim_matrix_simple(columns)
-				else:
-					matrix_dict = calculate_sim_matrix_professional(columns, args.outdiff)
-				alignment_files.extend(write_sim_dif_matrix(headers, out_file, matrix_dict, args.outdiff))
-				matrix_obj = matrix_dict_to_matrix_obj(matrix_dict, headers)
-				if args.tree_method in ["nj", "nj_bs"]:
-					mylogger.info("inferring Neigbor Joining base tree")
-					main_tree = calculate_NJ_tree(matrix_obj)
-					if args.tree_method == "nj_bs" and bootstraps > 1:
-						mylogger.info("inferring Neigbor Joining bootstrapped tree")
-						main_tree = calculate_bootstrapped_NJ_tree(main_tree, create_bootstrap_permutations(columns, args.outdiff, headers))
-					main_tree = remove_internal_tree_labels(main_tree) #remove internal noda labels which are not confidence values
-					tree_files.append(write_nj_tree(out_file, args.outdiff, bootstraps, main_tree))
-					if not args.no_verbose:
-						print "\nascii representation of your NJ tree (not showing confidence values):\n"
-						Bio.Phylo.draw_ascii(main_tree)
-						print "plain text version of your NJ tree object (WITH confidence values) is included in the log file"
-					lstrings.append("\n" + "-" * 50 + "\nplain text version of your NJ tree (with confidence values):\n" + str(main_tree) + "\n" + "-" * 50)
-			if args.outmatrix and docontinue:
-				alignment_files.append(write_binary_matrix(out_file, columns, column_indices))
-			if docontinue:
-				alignment_files.append(write_binaryalignment_phylip(out_file, columns))
-			if tree_method == "raxml_rapidbs" and docontinue:
-				tree_files.extend(call_raxml_rapidbs(alignment_files[-1], out_file, seed, {"-N":bootstraps, "-T":ncpus}))
-			elif tree_method == "raxml_bs" and docontinue:
-				tree_files.extend(call_raxml_bs(alignment_files[-1], out_file, seed, {"-N":bootstraps, "-T":ncpus}))
-			elif tree_method == "raxml" and docontinue:
-				print "number of alignmentfiles: " + str(len(alignment_files))
-				tree_files.extend(call_raxml_nobs(alignment_files[-1], out_file, seed, {"-T":ncpus}))
-			if docontinue:
-				if not args.no_verbose:
-					print "\n================================\FINISHED!"	
-				mylogger.info("Created the following alignment-files:\n\t-" + "\n\t-".join(alignment_files))
-				mylogger.info("Created the following tree-files:\n\t-" + "\n\t-".join(tree_files))
-		except Exception as e: #add more specific exception handlings
-			mylogger.error(str(e))
-			for frame in traceback.extract_tb(sys.exc_info()[2]):
-				fname,lineno,fn,text = frame
-				#print "Error in %s on line %d" % (fname, lineno)
-			mylogger.error("Error in %s on line %d :> %s" % (fname, lineno, text))
-		finally:
-			mylogger.info("\ncleaning up...")
-			for delfile in os.listdir("."):
-				if "delme_tempfile" in delfile:
-					os.remove(delfile)
-					
-	if len(wstrings) > 0 or len(estrings)>0:
-		if len(wstrings) > 0:
-			print "\nThere were Warnings!"
-		if len(estrings) > 0:
-			print "\nThere were Errors!"
-	print "See " + logfilename + " for details\n"
+
+	finally:
+		mylogger.info("\ncleaning up...")
+		for delfile in os.listdir("."):
+			if "delme_tempfile" in delfile:
+				os.remove(delfile)
+		if len(wstrings) > 0 or len(estrings)>0:
+			if len(wstrings) > 0:
+				print "\nThere were Warnings!"
+			if len(estrings) > 0:
+				print "\nThere were Errors!"
+		print "See " + logfilename + " for details\n"
 
 main()
