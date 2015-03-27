@@ -1,7 +1,7 @@
 #!/usr/bin/python
 #created 20.03.15 by John Vollmers
 #from Bio.Phylo.TreeConstruction import * #for using the directly biopython-implemented Distance(UPGMA + NJ) and parsimony methods. Not done/necessary yet
-import os, sys, argparse, time, multiprocessing, random, traceback, Bio
+import os, sys, logging, argparse, time, multiprocessing, random, traceback, Bio
 from Bio import AlignIO, SeqIO
 from subprocess import call
 from Bio.Phylo.Applications import RaxmlCommandline, PhymlCommandline
@@ -22,6 +22,7 @@ myparser.add_argument("-mt", "--make_tree", action = "store", dest = "tree_metho
 myparser.add_argument("-tbp","--tree_builder_path", action="store", dest = "treebuilder_path", default = "", help = "Path to treebuilder (currently only raxml supported) if not listed in $PATH")
 myparser.add_argument("-bs", "--bootstraps", action = "store", dest = "bootstraps", type = int, default = 1000, help = "Number of times to resample for bootstrapping\nonly bootstrapped trees will be produced, not the permutated data matrices")
 myparser.add_argument("--min_freq", action = "store", dest = "min_freq", type=int, default = 2, help = "Minimum frequency for Orthologeous Groups across all comparison-organisms\nfor Group to be considered in Analyses\nDefault=2 (exclude all singletons)\nRecommended when working with highly fragmented genomes or dubious ORF-finding")
+myparser.add_argument("--debug", action = "store_true", dest = "debug", default = False, help = "Log extra info for debugging")
 #myparser.add_argument("--ignore_columns", action="store", dest="ignore_column_list", default=None, help="indexes (starting with 1) of Organisms to be ignored when counting frequencies of Orthologeous Groups (Tip: ignore all but one representative member of overrepresented species/strains)")
 args = myparser.parse_args()
 
@@ -35,50 +36,77 @@ tree_method, treebuilder_path = args.tree_method, args.treebuilder_path
 min_freq = args.min_freq
 raxml_prog = "raxmlHPC"
 logfilename = out_file + "_PO_2_GENECONTENT_" + time.strftime("%Y%m%d%H%M%S") + ".log"
-verbose = True
+#verbose = True
 docontinue = True
+
+def setlogger(logfilename): #shall replace datsanerror, datsanlogmessage  datswarning
+	#format logger
+	logFormatter = logging.Formatter("[%(levelname)s]  %(message)s")
+	mylogger = logging.getLogger()
+	if args.debug:
+		mylogger.setLevel(logging.DEBUG)
+	else:
+		mylogger.setLevel(logging.INFO)
+	#set logger to write to logfile
+	fileHandler = logging.FileHandler(logfilename)
+	fileHandler.setFormatter(logFormatter)
+	mylogger.addHandler(fileHandler)
+	#set loger to write to stderr also
+	consoleHandler = logging.StreamHandler()
+	consoleHandler.setFormatter(logFormatter)
+	if args.no_verbose:
+		consoleHandler.setlevel(logging.WARNING)		
+	mylogger.addHandler(consoleHandler)
+	return mylogger
 
 def randomnumber(min, max):
 	#returns a random integer to use as seed for rxml and pyml
+	mylogger.debug("randomnumber(%s, %s)" %(min, max))
 	random.seed()
 	return random.randint(min,max)
 
 def checkargs(args):
+	mylogger.debug("checkargs(%s)" %(args,))
 	global verbose, ncpus, seed, bootstraps, tree_method, raxml_prog
 	global ncpus
-	if args.no_verbose:
-		verbose = False
+	global.args
+#	if args.no_verbose:
+#		verbose = False
 	if not os.path.exists(PO_file) or not os.path.isfile(PO_file):
-		datsANerror("ERROR: cannot find proteinortho-resultfile: " + PO_file)
+		estring = "Cannot find proteinortho-resultfile: %s" % PO_file
+		mylogger.error(estring)
+		raise IOError(estring)
 	if available_cores<ncpus:
-		datsAwarning("WARNING: less than " + str(ncpus) + " cores/threads available! Setting number of cpus to " + str(available_cores))
+		mylogger.warning("WARNING: less than %s cores/threads available! Setting number of cpus to %s" %(ncpus, available_cores))
 		ncpus = available_cores
 		
 	if seed == 0 and "raxml" in tree_method:
 		seed = randomnumber(1, 2000)
-		datsAlogmessage("Setting seed randomly to " + str(seed))
+		mylogger.info("Setting seed randomly to %s" % seed)
 	elif "raxml" in tree_method:
-		datsAlogmessage("Using " + str(seed) + " as seed")
+		mylogger.info("Using %s as seed" %seed)
 	if "raxml" in tree_method:
 		if treebuilder_path == "":
 			if which("raxmlHPC") == None and which("raxmlHPC-PTHREADS") == None and which("raxmlHPC-PTHREADS-SSE3") == None and which("raxmlHPC-SSE3") == None:
-				datsANerror("ERROR: No raxmlHPC binaries found in any directory within $PATH! please provide a PATH to raxml binaries!")
+				estring = "No raxmlHPC binaries found in any directory within $PATH! please provide a PATH to raxml binarieswhen using raxml for treebuilding!"
+				mylogger.error(estring)
+				raise OSError(estring)
 				tree_method = "none"
 			else:
 				if which("raxmlHPC-PTHREADS-SSE3") != None:
 					raxml_prog = which("raxmlHPC-PTHREADS-SSE3")
-					datsAlogmessage("found " + raxml_prog + "! will use this tool") 
+					mylogger.info("found %s! will use this tool" %raxml_prog) 
 				elif which("raxmlHPC-PTHREADS")!=None:
 					raxml_prog = which("raxmlHPC-PTHREADS")
-					datsAlogmessage("found " + raxml_prog + "! will use this tool")
+					mylogger.info("found " + raxml_prog + "! will use this tool")
 				else:
-					datsAwarning("Warning: multithreading is only supported with 'PTHREADS'-versions of raxml. Not sure if your raxml binaries support this.\t\nif raxml calculations fail, recombile raxml with 'PTHREADS'-option")
+					mylogger.warning("Warning: multithreading is only supported with 'PTHREADS'-versions of raxml. Not sure if your raxml binaries support this.\t\nif raxml calculations fail, recombile raxml with 'PTHREADS'-option")
 					if which("raxmlHPC-SSE3") != None:
 						raxml_prog = which("raxmlHPC-SSE3")
-						datsAlogmessage("found " + raxml_prog + "! will use this tool")
+						mylogger.info("found " + raxml_prog + "! will use this tool")
 					else:
 						raxml_prog = which("raxmlHPC")
-						datsAlogmessage("found " + raxml_prog + "! will use this tool")
+						mylogger.info("found " + raxml_prog + "! will use this tool")
 				try:
 					checkraxml_cline = RaxmlCommandline(raxml_prog, version = True)
 					versiontext = checkraxml_cline()[0]
@@ -86,12 +114,12 @@ def checkargs(args):
 					endv = versiontext[startv:].find(" ")
 					version = versiontext[startv:startv+endv].split(".")
 					if int(version[0]) < 8 or (int(version[0]) == 8 and int(version[1]) == 0 and int(version[2]) <20):
-						datsAwarning("Warning: This script was devised for and tested with RAxML v8.0.20. Your version is v" + ".".join(version)+" !\n\tThis may very well still work, but if it doesn't it's YOUR fault!")
+						mylogger.warning("Warning: This script was devised for and tested with RAxML v8.0.20. Your version is v" + ".".join(version)+" !\n\tThis may very well still work, but if it doesn't it's YOUR fault!")
 				except:
-					datsAwarning("Warning: This script was devised for and tested with RAxML v8.0.20.\n\tNot sure which version of RAxML you're using, but it sure as hell isn't v7 or v8!\n\tThis may very well still work, but if it doesn't it's YOUR fault!")
+					mylogger.warning("Warning: This script was devised for and tested with RAxML v8.0.20.\n\tNot sure which version of RAxML you're using, but it sure as hell isn't v7 or v8!\n\tThis may very well still work, but if it doesn't it's YOUR fault!")
 		elif os.path.exists(treebuilder_path) and os.path.isfile(treebuilder_path):
 			if ncpus > 1 and not "PTHREADS" in treebuilder_path:
-				datsAwarning("Warning: multithreading is only supported with 'PTHREADS'-versions of raxml. Not sure if your choosen binaries support this.\t\nif raxml calculations fail, recombile raxml with 'PTHREADS'-option") 
+				mylogger.warning("Warning: multithreading is only supported with 'PTHREADS'-versions of raxml. Not sure if your choosen binaries support this.\t\nif raxml calculations fail, recombile raxml with 'PTHREADS'-option") 
 			try:
 				checkraxml_cline = RaxmlCommandline(version = True)
 				versiontext = checkraxml_cline()[0]
@@ -99,10 +127,10 @@ def checkargs(args):
 				endv = versiontext[startv:].find(" ")
 				version = versiontext[startv:startv+endv].split(".")
 				if int(version[0]) < 8 or (int(version[0]) == 8 and int(version[1]) == 0 and int(version[2]) < 20):
-						datsAwarning("Warning: This script was devised for and tested with RAxML v8.0.20. Your version is v" + ".".join(version) + " !\n\tThis may very well still work, but if it doesn't it's YOUR fault!")
+						mylogger.warning("Warning: This script was devised for and tested with RAxML v8.0.20. Your version is v" + ".".join(version) + " !\n\tThis may very well still work, but if it doesn't it's YOUR fault!")
 				raxml_prog=treebuilder_path
 			except:
-				datsAwarning("Warning: Correct raxML-version not found under " + treebuilder_path + "!\nWill NOT calculate ML trees!")
+				mylogger.warning("Warning: Correct raxML-version not found under " + treebuilder_path + "!\nWill NOT calculate ML trees!")
 				tree_method = "none" 
 
 def which(afile):
@@ -112,26 +140,6 @@ def which(afile):
 			return path + "/" + afile
 	return None
 
-def datsAwarning(wstring):
-	global wstrings
-	wstrings.append(wstring)
-	if verbose:
-		print "\n" + wstring + "\n"
-
-def datsANerror(estring):
-	global estrings
-	global docontinue
-	estrings.append(estring)
-	docontinue=False
-	if verbose:
-		print >>sys.stderr, "\n" + estring + "\n"
-
-def datsAlogmessage(lstring):
-	global lstrings
-	lstrings.append(lstring)
-	if verbose:
-		print lstring
-
 def read_PO_file(filename):
 	open_PO_file = open(filename, 'r')
 	firstline = True
@@ -140,12 +148,12 @@ def read_PO_file(filename):
 	for line in open_PO_file:
 		if firstline:
 			if line.startswith("#species"):
-				datsAwarning("WARNING! It seems you are using results from Proteinortho4. It's recommended to use Proteinortho5!\n\t(However, this script SHOULD still work)")
+				mylogger.warning("WARNING! It seems you are using results from Proteinortho4. It's recommended to use Proteinortho5!\n\t(However, this script SHOULD still work)")
 			elif line.startswith("# Species"):
-				if verbose:
+				if not args.no_verbose:
 					print "\nProteinortho-results are based on Proteinortho5 or later. Good."
 			else:
-				datsAwarning("WARNING! Cannot clearly recognize Format of Proteinortho-results! This may produce erroneous results!\n\t For best results use Proteinortho5!") 
+				mylogger.warning("WARNING! Cannot clearly recognize Format of Proteinortho-results! This may produce erroneous results!\n\t For best results use Proteinortho5!") 
 			headers = line.rstrip().split("\t")[org_index:]
 			#dict_org_genecounts = dict.fromkeys(headers, 0) #for counting number of genes in each organism for calculation of simple difference/similarity matrizes
 			columns = [[h.rstrip(),[]] for h in headers]
@@ -153,7 +161,9 @@ def read_PO_file(filename):
 		elif not line.startswith("#"):
 			zeilentokens = line.rstrip().split("\t")[org_index:]
 			if len(zeilentokens) != len(headers):
-				datsANerror("ERROR: Different numbers of columns in header_line and Locus_tag_lines in " + filename)
+				estring = "Different numbers of columns in header_line and Locus_tag_lines in %s" % filename
+				mylogger.error(estring)
+				raise Runtime(estring)
 				break
 			for h in range(len(headers)):
 				if zeilentokens[h] == "*":
@@ -166,20 +176,22 @@ def read_PO_file(filename):
 	#check if everything is ok before continuing:
 	for c in columns:
 		if len(c[1]) != len(columns[0][1]):
-			datsANerror("ERROR: something went wrong while reading proteinortho-results. Not the same number of lines (=OGs) for all Organisms!")
+			estring = "ERROR: something went wrong while reading proteinortho-results. Not the same number of lines (=OGs) for all Organisms!"
+			mylogger.error(estring)
+			raise RuntimeException(estring)
 	OG_number = len(columns[0][1])
-	datsAlogmessage("\nrecognized " + str(OG_number) + " total 'Orthologeous Groups' (OGs) + singletons in the comparison organisms")
+	mylogger.info("\nrecognized " + str(OG_number) + " total 'Orthologeous Groups' (OGs) + singletons in the comparison organisms")
 	OG_indices = range(1, OG_number + 1) #I know, I know! NOT the best way to keep track of the indices of each OG based on the original PO_file! 
 	return headers, columns, OG_number, OG_indices
 	
 def filter_OGs_by_freq(minfreq, columns, column_indices):
-	datsAlogmessage("Filtering out all OGs with a frequency below " + str(minfreq) + " between all comparison organisms")
+	mylogger.info("Filtering out all OGs with a frequency below " + str(minfreq) + " between all comparison organisms")
 	#filter out all OGs that do not occur in at leas minfreq comparison-organisms
 	#remember: columns are organized as [[organism1=[header],[OGs]], [organism2=[header],[OGs]],...]
 	line_index = 0
 	#print "len(columns[0])="+str(len(columns[0]))
 	while line_index < len(columns[0][1]):
-		if verbose:
+		if not args.no_verbose:
 			sys.stdout.write("\rProcessing OG " + str(line_index) + " from "+str(len(columns[0][1])))
 			sys.stdout.flush()
 		OG_sum = 0
@@ -192,7 +204,7 @@ def filter_OGs_by_freq(minfreq, columns, column_indices):
 		else:
 			#print "OG_sum = " + str(OG_sum)
 			line_index+=1 #check next line, if this one is ok
-	datsAlogmessage("\n" + str(len(columns[0][1])) + " OGs remaining after filtering")
+	mylogger.info("\n" + str(len(columns[0][1])) + " OGs remaining after filtering")
 	return columns, column_indices
 
 def write_binary_matrix(outname, columns, column_indices):
@@ -220,7 +232,7 @@ def make_single_bootstrap_tree(columns, maxlen, method, headers, mp_output):
 	mp_output.put(current_permutation_tree)
 
 def create_bootstrap_permutations(columns, method, headers): #enable multiprocessing here!
-	datsAlogmessage("creating " + str(bootstraps) + " bootstrap_permutations of binary character matrix (and corresponding bootstrap tree)\nusing " + str(ncpus) + " cpus")
+	mylogger.info("creating " + str(bootstraps) + " bootstrap_permutations of binary character matrix (and corresponding bootstrap tree)\nusing " + str(ncpus) + " cpus")
 	full_thread_mp_groups = bootstraps // ncpus
 	remaining_mp_group_threads = bootstraps % ncpus
 	maxlen = len(columns[0][1])
@@ -249,9 +261,10 @@ def run_multiprocess_group(columns, method, headers, cpus): #must start working 
 		group_results = [mp_output.get() for p in processes]
 		return group_results
 	else:
-		datsANerror("ERROR: FORBIDDEN TO CALL THIS (MULTIPROCESSING) FUNCTION FROM AN EXTERNAL MODULE\n-->ABORTING")
+		raise RuntimeError("FORBIDDEN TO CALL THIS (MULTIPROCESSING) FUNCTION FROM AN EXTERNAL MODULE\n-->ABORTING")
 
 def calculate_bootstrapped_NJ_tree(ref_tree, permutation_trees):
+	mylogger.debug("calculate_bootstrapped_NJ_tree(ref_tree, permutation_trees)")
 	from Bio.Phylo.Consensus import get_support
 	bs_tree = get_support(ref_tree, permutation_trees)
 	return bs_tree
@@ -279,7 +292,7 @@ def calculate_sim_matrix_professional(columns, method):
 
 def matrix_dict_to_matrix_obj(matrix_dict, headers): #headers-list is necessary to enforce original order of organisms in final matrix (dicts get all jumbled up)
 	#this function converts my square tabular matrix format to a triangular format biopython matrix object 
-#	datsAlogmessage("converting matrix_dict to biopython matrix_object")
+#	mylogger.info("converting matrix_dict to biopython matrix_object")
 	from Bio.Phylo.TreeConstruction import _Matrix, _DistanceMatrix
 	matrix_type = "difference_dict"
 	matrix_list = []
@@ -301,18 +314,20 @@ def calculate_NJ_tree(matrix_obj):
 	return tree
 
 def remove_internal_tree_labels(thistree):
-	datsAlogmessage("\nRemoving internal node labels that do nor refer to confidence values from final tree")
+	mylogger.debug("remove_internal_tree_labels(tree)")
+	mylogger.info("\nRemoving internal node labels that do nor refer to confidence values from final tree")
 	for inode in thistree.get_nonterminals():
 		inode.name = None
 	return thistree
 
 def write_nj_tree(outname, matrix_method, bootstraps, main_tree):
+	mylogger.debug("write_nj_tree(%s, %s, %s, main_tree)" %(outname, matrix_method, bootstraps))
 	from Bio import Phylo
-	outname += "." + matrix_method + "." + tree_method
+	outname += ".%s.%s" %(matrix_method, tree_method)
 	if tree_method == "nj_bs":
-		outname += "." + str(bootstraps)
+		outname += ".%s" % bootstraps
 	outname += ".tree.newick"
-	datsAlogmessage("writing treefile to " + outname)
+	mylogger.info("writing treefile to %s" % outname)
 	out_file = open(outname, "w")
 	Phylo.write(main_tree, out_file, "newick")
 	out_file.close()
@@ -343,18 +358,19 @@ def calculate_sim_matrix_simple(columns):
 
 def write_sim_dif_matrix(headers, outname, matrix_dict, matrix_method): #adapt for creating bootstraps (multiple marices in phylip format)
 	#using the headers list to arrange the organisms as in the input data (dictionaries get all jumbled up)
-	datsAlogmessage("writing similarity and difference matrices")
-	outfilesim = open(outname + "." + matrix_method + ".sim", "w")
-	outfilediff = open(outname + "." + matrix_method + ".diff", "w")
+	mylogger.debug("write_sim_dif_matrix(headers, %s, matrix_dict, %s)" %(outname, matrix_method))
+	mylogger.info("writing similarity and difference matrices")
+	outfilesim = open("%s.%s.sim" %(outname, matrix_method), "w")
+	outfilediff = open("%s.%s.diff" %(outname, matrix_method), "w")
 	firstline = ""
 	for org1 in headers:
 		current_sim_line, current_diff_line = org1 , org1
 		current_line = org1
 		for org2 in headers:
 			if firstline != None:
-				firstline += "\t" + org2
-			current_sim_line += "\t" + str(matrix_dict[org1]["similarity_dict"][org2])
-			current_diff_line += "\t" + str(matrix_dict[org1]["difference_dict"][org2])
+				firstline += "\t%s" % org2
+			current_sim_line += "\t%s" % matrix_dict[org1]["similarity_dict"][org2]
+			current_diff_line += "\t%s" % matrix_dict[org1]["difference_dict"][org2]
 #			print current_diff_line
 		if firstline != None:
 			outfilesim.write(firstline + "\n")
@@ -365,11 +381,11 @@ def write_sim_dif_matrix(headers, outname, matrix_dict, matrix_method): #adapt f
 	return outfilesim.name, outfilediff.name
 
 def write_binaryalignment_fasta(outputfilename, columns):
-	outfile = open(outputfilename+".fas", "w")
-	if verbose:
-		datsAlogmessage("producing alignment file '" + outfile.name + "' in fasta format")
+	outfile = open(outputfilename + ".fas", "w")
+	if not args.no_verbose:
+		mylogger.info("producing alignment file '%s' in fasta format" % outfile.name)
 	for c in columns:
-		outfile.write(">" + c[0] + "\n")
+		outfile.write(">%s\n" % c[0])
 		for line in c[1]:
 			outfile.write(str(line))
 		outfile.write("\n")
@@ -377,23 +393,23 @@ def write_binaryalignment_fasta(outputfilename, columns):
 	return outfile.name
 
 def write_binaryalignment_phylip(outputfilename, columns):
+	mylogger.debug("write_binaryalignment_phylip(%s, columns)" % outputfilename)
 	outfile = open(outputfilename + ".relaxed.phy","w")
-	if verbose:
-		datsAlogmessage("producing alignment file '" + outfile.name + "' in relaxed sequential phylip format")
+	if not args.no_verbose:
+		mylogger.info("producing alignment file '%s' in relaxed sequential phylip format" % outfile.name)
 	outfile.write(str(len(columns)) + " " + str(len(columns[0][1])))
 	for c in columns:
-		#print c[0]+c[0]
-		linestring = "\n" + c[0] + " "
-		#print "line"+str(c[1][0])+"line"
+		linestring = "\n%s " % c[0]
 		for line in c[1]:
 			linestring += str(line)
 		#print linestring
 		outfile.write(linestring)
 	outfile.close()
-	datsAlogmessage("writing: " + outfile.name)
+	mylogger.info("writing: " + outfile.name)
 	return outfile.name
 
 def call_raxml_rapidbs(alignmentfile, outputfilename, seed, parameters): #parameters should be a dictionary (This dictionary thing was introduced, so that the script can be more easily adapted to accept custom commandline-parameters for raxml by the user)
+	mylogger.debug("call_raxml_rapidbs(alignmentfile, %s, %s, %s)" % outputfilename, seed, parameters)
 	nr_threads = 4
 	if "-T" in parameters:
 		nr_threads=parameters["-T"]
@@ -403,24 +419,25 @@ def call_raxml_rapidbs(alignmentfile, outputfilename, seed, parameters): #parame
 	elif "-#" in parameters:
 		bootstraps = parameters["-#"]
 	
-	datsAlogmessage("Calculating phylogenies: 'rapid bootstrap analyses and search for best-scoring ML Tree in one run' using raxmlHPC")
-	try:
-		outname = "GENECONTENT_rapidBS" + str(bootstraps) + "_minfreq"+str(min_freq) + "_" + time.strftime("%Y%m%d%H%M%S") + "_" + "final_tree"	
-		raxml_cline = RaxmlCommandline(raxml_prog, sequences = alignmentfile, algorithm = "a", model = "BINGAMMA", name = outname, parsimony_seed = seed, rapid_bootstrap_seed = seed, num_replicates = bootstraps, threads = nr_threads) 
-		datsAlogmessage("-->" + str(raxml_cline))
-		raxml_cline()
-		datsAlogmessage("-->SUCCESS")
-		#the resultfiles will be: "RAxML_bipartitions.rapidBS_final_tree" and "RAxML_bipartitionsBranchLabels.rapidBS_final_tree"
-		#Labels on nodes or branches, respectively
-		outputfiles = ["RAxML_bipartitions."+outname, "RAxML_bipartitionsBranchLabels."+outname]
-	except Exception as e:
+	mylogger.info("Calculating phylogenies: 'rapid bootstrap analyses and search for best-scoring ML Tree in one run' using raxmlHPC")
+	#try:
+	outname = "GENECONTENT_rapidBS%s_minfreq%s_%s_final_tree" %(bootstraps, minfreq, time.strftime("%Y%m%d%H%M%S"))
+	raxml_cline = RaxmlCommandline(raxml_prog, sequences = alignmentfile, algorithm = "a", model = "BINGAMMA", name = outname, parsimony_seed = seed, rapid_bootstrap_seed = seed, num_replicates = bootstraps, threads = nr_threads) 
+	mylogger.info("-->" + str(raxml_cline))
+	raxml_cline()
+	mylogger.info("-->SUCCESS")
+	#the resultfiles will be: "RAxML_bipartitions.rapidBS_final_tree" and "RAxML_bipartitionsBranchLabels.rapidBS_final_tree"
+	#Labels on nodes or branches, respectively
+	outputfiles = ["RAxML_bipartitions."+outname, "RAxML_bipartitionsBranchLabels."+outname]
+	#except Exception as e:
 		#note for future versions: create a custom exception "raxml_except" instead of using this construct over and over!
-		datsAlogmessage("-->FAILURE")
-		datsAwarning("WARNING: rapid bootstrap analyses and search for best-scoring ML tree using raxmlHPC has failed!\n\t" + str(e))	
-		return None
+	#	mylogger.info("-->FAILURE")
+	#	mylogger.warning("rapid bootstrap analyses and search for best-scoring ML tree using raxmlHPC has failed!\n\t" + str(e))
+	#	return None
 	return outputfiles
 
 def call_raxml_bs(alignmentfile, outputfilename, seed, parameters):
+	mylogger.debug("call_raxmlbs(alignmentfile, %s, %s, %s)" % outputfilename, seed, parameters)
 	nr_threads = 4
 	if "-T" in parameters:
 		nr_threads = parameters["-T"]
@@ -429,92 +446,101 @@ def call_raxml_bs(alignmentfile, outputfilename, seed, parameters):
 		bootstraps = parameters["-N"]
 	elif "-#" in parameters:
 		bootstraps = parameters["-#"]
-	datsAlogmessage("Calculating phylogenies: Thorough bootstrap analyses with raxml")
+	mylogger.info("Calculating phylogenies: Thorough bootstrap analyses with raxml")
 		
-	datsAlogmessage("\tDetermining best ML tree of 20 raxmlHPC runs") 
-	try:
-		raxml_cline = RaxmlCommandline(raxml_prog, model = "BINGAMMA", name = "best_delme_tempfile", parsimony_seed = seed, num_replicates = 20, sequences = alignmentfile, threads = nr_threads) 
-		datsAlogmessage("\t-->"+str(raxml_cline))
-		raxml_cline()
-		#the resultfile will be :"RAxML_bestTree.best_delme_tempfile"
-		datsAlogmessage("\t-->SUCCESS")
-	except Exception as e:
-		datsAlogmessage("\t--FAILURE")
-		datsAwarning("WARNING: thorough bootstrap analyses using raxmlHPC failed!\n\t"+str(e))
-		return None
+	mylogger.info("\tDetermining best ML tree of 20 raxmlHPC runs") 
+	#try:
+	raxml_cline = RaxmlCommandline(raxml_prog, model = "BINGAMMA", name = "best_delme_tempfile", parsimony_seed = seed, num_replicates = 20, sequences = alignmentfile, threads = nr_threads) 
+	mylogger.info("\t-->"+str(raxml_cline))
+	raxml_cline()
+	#the resultfile will be :"RAxML_bestTree.best_delme_tempfile"
+	mylogger.info("\t-->SUCCESS")
+	#except Exception as e:
+	#	mylogger.info("\t--FAILURE")
+	#	mylogger.warning("WARNING: thorough bootstrap analyses using raxmlHPC failed!\n\t"+str(e))
+	#	return None
 	
-	datsAlogmessage("\tDoing bootstrap analyses with "+str(bootstraps)+" runs using raxmlHPC")
-	try:
-		raxml_cline = RaxmlCommandline(raxml_prog, model = "BINGAMMA", sequences = alignmentfile, name = "boot_delme_tempfile", parsimony_seed = seed, bootstrap_seed = seed, num_replicates = bootstraps, threads = nr_threads)
-		datsAlogmessage("\t-->" + str(raxml_cline))
-		raxml_cline()
-		#the resultfile will be: "RAxML_bootstrap.boot_delme_tempfile"
-		datsAlogmessage("\t-->SUCCESS")
-	except Exception as e:
-		datsAlogmessage("\t-->FAILURE")
-		datsAwarning("WARNING: thorough bootstrap analyses using raxmlHPC failed!\n\t" + str(e))
-		return None
+	mylogger.info("\tDoing bootstrap analyses with %s runs using raxmlHPC" % bootstraps)
+	#try:
+	raxml_cline = RaxmlCommandline(raxml_prog, model = "BINGAMMA", sequences = alignmentfile, name = "boot_delme_tempfile", parsimony_seed = seed, bootstrap_seed = seed, num_replicates = bootstraps, threads = nr_threads)
+	mylogger.info("\t-->" + str(raxml_cline))
+	raxml_cline()
+	#the resultfile will be: "RAxML_bootstrap.boot_delme_tempfile"
+	mylogger.info("\t-->SUCCESS")
+	#except Exception as e:
+	#	mylogger.info("\t-->FAILURE")
+	#	mylogger.warning("WARNING: thorough bootstrap analyses using raxmlHPC failed!\n\t" + str(e))
+	#	return None
 		
-	datsAlogmessage("\tDrawing bipartitions of bootstrap trees onto best ML tree using raxmlHPC")
-	try:
-		outname = "GENECONTENT_BS" + str(bootstraps) + "_minfreq" + str(min_freq) + time.strftime("%Y%m%d%H%M%S") + "_" + "final_tree"
-		raxml_cline = RaxmlCommandline(raxml_prog, model = "BINGAMMA", parsimony_seed = seed, algorithm = "b", starting_tree = "RAxML_bestTree.best_delme_tempfile", bipartition_filename="RAxML_bootstrap.boot_delme_tempfile", name=outname)
-		datsAlogmessage("\t-->"+str(raxml_cline))
-		raxml_cline()
-		#The resultfiles will be: RAxML_bipartitions.final_tree" and "RAxML_bipartitionsBranchLabels.final_tree"
-		outputfiles=["RAxML_bipartitions."+outname,"RAxML_bipartitionsBranchLabels."+outname]
-		datsAlogmessage("\t-->SUCCESS")	
-	except Exception as e:
-		datsAlogmessage("\t-->FAILURE")
-		datsAwarning("WARNING: thorough bootstrap analyses using raxmlHPC failed!\n\t"+str(e))
-		return None
+	mylogger.info("\tDrawing bipartitions of bootstrap trees onto best ML tree using raxmlHPC")
+	#try:
+	outname = "GENECONTENT_BS%s_minfreq%s_%s_final_tree" %(bootstraps, min_freq, time.strftime("%Y%m%d%H%M%S"))
+	raxml_cline = RaxmlCommandline(raxml_prog, model = "BINGAMMA", parsimony_seed = seed, algorithm = "b", starting_tree = "RAxML_bestTree.best_delme_tempfile", bipartition_filename="RAxML_bootstrap.boot_delme_tempfile", name=outname)
+	mylogger.info("\t-->"+str(raxml_cline))
+	raxml_cline()
+	#The resultfiles will be: RAxML_bipartitions.final_tree" and "RAxML_bipartitionsBranchLabels.final_tree"
+	outputfiles=["RAxML_bipartitions."+outname,"RAxML_bipartitionsBranchLabels."+outname]
+	mylogger.info("\t-->SUCCESS")
+	#except Exception as e:
+	#	mylogger.info("\t-->FAILURE")
+	#	mylogger.warning("WARNING: thorough bootstrap analyses using raxmlHPC failed!\n\t"+str(e))
+	#	return None
 	return outputfiles
 
 def call_raxml_nobs(alignmentfile, outputfilename, seed, parameters):
+	mylogger.debug("call_raxml_nobs(alignmentfile, %s, %s, %s)" % outputfilename, seed, parameters)
 	nr_threads=4
 	if "-T" in parameters:
 		nr_threads=parameters["-T"]
-	try:
-		outname="GENECONTENT_raxml_"+"_minfreq"+str(min_freq)+time.strftime("%Y%m%d%H%M%S")+"_"+"final_tree"
-		datsAlogmessage("Calculating phylogeny: Determining best ML tree of 20 raxmlHPC runs")
-		raxml_cline=RaxmlCommandline(raxml_prog, sequences = alignmentfile, model = "BINGAMMA", name = outname,  parsimony_seed = seed, num_replicates = 20, threads = nr_threads)
-		datsAlogmessage("\t-->" + str(raxml_cline))
-		raxml_cline()
-		#the resultfile will be :"RAxML_bestTree.final_tree"
-		outputfiles = ["RAxML_bestTree." + outname]
-		datsAlogmessage("\tSUCCESS")
-		print "deleting temporary files"
-		for delfile in os.listdir("."):
-			if delfile.startswith("RAxML_") and "." + outname + ".RUN." in delfile:
-				#print "deleting temp-file: "+delfile
-				os.remove(delfile)
-	except Exception as e:
-		datsAlogmessage("\t-->FAILURE")
-		datsAwarning("WARNING: searching for best ML tree using raxmlHPC failed!\n\t"+str(e))
-		return None
+	#try:
+	outname="GENECONTENT_raxml_minfreq%s_%s_final_tree" %(min_freq, time.strftime("%Y%m%d%H%M%S"))
+	mylogger.info("Calculating phylogeny: Determining best ML tree of 20 raxmlHPC runs")
+	raxml_cline=RaxmlCommandline(raxml_prog, sequences = alignmentfile, model = "BINGAMMA", name = outname,  parsimony_seed = seed, num_replicates = 20, threads = nr_threads)
+	mylogger.info("\t-->" + str(raxml_cline))
+	raxml_cline()
+	#the resultfile will be :"RAxML_bestTree.final_tree"
+	outputfiles = ["RAxML_bestTree." + outname]
+	mylogger.info("\tSUCCESS")
+	print "deleting temporary files"
+	for delfile in os.listdir("."):
+		if delfile.startswith("RAxML_") and "." + outname + ".RUN." in delfile:
+			#print "deleting temp-file: "+delfile
+			os.remove(delfile)
+	#except Exception as e:
+	#	mylogger.info("\t-->FAILURE")
+	#	mylogger.warning("WARNING: searching for best ML tree using raxmlHPC failed!\n\t"+str(e))
+	#	return None
 	return outputfiles
 
-def write_logfile(logfilename):
-	logfile = open(logfilename,'w')
-	logfile.write("PO_2_GENECONTENT.py logfile")
-	logfile.write("\n" + time.strftime("%c"))
-	logfile.write("\nMessages\n:")
-	for l in lstrings:
-		logfile.write(l + "\n")
-	logfile.write("\n-----------\nWarnings:\n")
-	for w in wstrings:
-		logfile.write(w + "\n")
-	logfile.write("\n------------\nErrors:\n")
-	for e in estrings:
-		logfile.write(e + "\n")
-	logfile.close()
+mylogger = setlogger(logfilename)
 
 def main():
 	alignment_files = []
 	tree_files = []
-	if verbose:
-		print "\n ==PO_2_GENECONTENT.py " + version + " by John Vollmers==\n"
-	checkargs(args)
+	if not args.no_verbose:
+		mylogger.info("\n ==PO_2_GENECONTENT.py %s by John Vollmers==\n" % version)
+	try:
+		checkargs(args)
+	except IOError as e:
+		for frame in traceback.extract_tb(sys.exc_info()[2]):
+			fname,lineno,fn,text = frame
+			#print "Error in %s on line %d :> %text" % (fname, lineno, text)
+		mylogger.error("Error in %s on line %d :> %s" % (fname, lineno, text))
+		mylogger.error(str(e))
+		mylogger.error("One or more Inputfiles could not be found")
+	except OSError as e:
+		for frame in traceback.extract_tb(sys.exc_info()[2]):
+			fname,lineno,fn,text = frame
+			#print "Error in %s on line %d :> %text" % (fname, lineno, text)
+		mylogger.error("Error in %s on line %d :> %s" % (fname, lineno, text))
+		mylogger.error(str(e))
+		mylogger.error("One or more external dependancies for the specified workflow could not be found")
+	except Exception as e:
+		for frame in traceback.extract_tb(sys.exc_info()[2]):
+			fname,lineno,fn,text = frame
+			#print "Error in %s on line %d :> %text" % (fname, lineno, text)
+		mylogger.error("Error in %s on line %d :> %s" % (fname, lineno, text))
+		mylogger.error(str(e))
 	if docontinue:
 		try:
 			headers, columns, OG_number , column_indices = read_PO_file(PO_file)
@@ -523,7 +549,7 @@ def main():
 			if args.outfasta and docontinue:
 				alignment_files.append(write_binaryalignment_fasta(out_file, columns))
 			if args.outdiff != "none" and docontinue:
-				datsAlogmessage("\nGenerating similarity/distance matrices using " + args.outdiff)
+				mylogger.info("\nGenerating similarity/distance matrices using %s" % args.outdiff)
 				if args.outdiff == "simple":
 					matrix_dict = calculate_sim_matrix_simple(columns)
 				else:
@@ -531,14 +557,14 @@ def main():
 				alignment_files.extend(write_sim_dif_matrix(headers, out_file, matrix_dict, args.outdiff))
 				matrix_obj = matrix_dict_to_matrix_obj(matrix_dict, headers)
 				if args.tree_method in ["nj", "nj_bs"]:
-					datsAlogmessage("inferring Neigbor Joining base tree")
+					mylogger.info("inferring Neigbor Joining base tree")
 					main_tree = calculate_NJ_tree(matrix_obj)
 					if args.tree_method == "nj_bs" and bootstraps > 1:
-						datsAlogmessage("inferring Neigbor Joining bootstrapped tree")
+						mylogger.info("inferring Neigbor Joining bootstrapped tree")
 						main_tree = calculate_bootstrapped_NJ_tree(main_tree, create_bootstrap_permutations(columns, args.outdiff, headers))
 					main_tree = remove_internal_tree_labels(main_tree) #remove internal noda labels which are not confidence values
 					tree_files.append(write_nj_tree(out_file, args.outdiff, bootstraps, main_tree))
-					if verbose:
+					if not args.no_verbose:
 						print "\nascii representation of your NJ tree (not showing confidence values):\n"
 						Bio.Phylo.draw_ascii(main_tree)
 						print "plain text version of your NJ tree object (WITH confidence values) is included in the log file"
@@ -555,17 +581,18 @@ def main():
 				print "number of alignmentfiles: " + str(len(alignment_files))
 				tree_files.extend(call_raxml_nobs(alignment_files[-1], out_file, seed, {"-T":ncpus}))
 			if docontinue:
-				if verbose:
+				if not args.no_verbose:
 					print "\n================================\FINISHED!"	
-				datsAlogmessage("Created the following alignment-files:\n\t-" + "\n\t-".join(alignment_files))
-				datsAlogmessage("Created the following tree-files:\n\t-" + "\n\t-".join(tree_files))
-		except Exception as e:
-			datsAlogmessage(str(e))
+				mylogger.info("Created the following alignment-files:\n\t-" + "\n\t-".join(alignment_files))
+				mylogger.info("Created the following tree-files:\n\t-" + "\n\t-".join(tree_files))
+		except Exception as e: #add more specific exception handlings
+			mylogger.error(str(e))
 			for frame in traceback.extract_tb(sys.exc_info()[2]):
 				fname,lineno,fn,text = frame
-				print "Error in %s on line %d" % (fname, lineno)
+				#print "Error in %s on line %d" % (fname, lineno)
+			mylogger.error("Error in %s on line %d :> %s" % (fname, lineno, text))
 		finally:
-			datsAlogmessage("\ncleaning up...")
+			mylogger.info("\ncleaning up...")
 			for delfile in os.listdir("."):
 				if "delme_tempfile" in delfile:
 					os.remove(delfile)
@@ -576,6 +603,5 @@ def main():
 		if len(estrings) > 0:
 			print "\nThere were Errors!"
 	print "See " + logfilename + " for details\n"
-	write_logfile(logfilename)
 
 main()
