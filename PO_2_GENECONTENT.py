@@ -492,6 +492,7 @@ def rename_phylipstile(headers):
 		counter += 1
 		headerdict[org] = str(counter).zfill(10) #for phylip-style files
 		headerdict[str(counter).zfill(10)] = org #for parsing back to original names later
+		mylogger.info("%s --> %s " %(org, str(counter).zfill(10)))
 	#print headerdict
 	return headerdict
 
@@ -550,12 +551,14 @@ def write_binaryalignment_phylip(outputfilename, columns):
 	return outfile.name
 
 def call_raxml_rapidbs(alignmentfile, outputfilename, seed, parameters): #parameters should be a dictionary (This dictionary thing was introduced, so that the script can be more easily adapted to accept custom commandline-parameters for raxml by the user)
-	mylogger.debug("call_raxml_rapidbs(alignmentfile, %s, %s, %s)" % outputfilename, seed, parameters)
-	
+	mylogger.debug("call_raxml_rapidbs(alignmentfile, %s, %s, %s)" %(outputfilename, seed, parameters))
+	nr_threads=4
+	if "-T" in parameters:
+		nr_threads=parameters["-T"]	
 	mylogger.info("Calculating phylogenies: 'rapid bootstrap analyses and search for best-scoring ML Tree in one run' using raxmlHPC")
 	#try:
 	
-	outname = "GENECONTENT_rapidBS%s_minfreq%s_%s_final_tree" %(args.bootstraps, minfreq, time.strftime("%Y%m%d%H%M%S"))
+	outname = "GENECONTENT_rapidBS%s_minfreq%s_%s_final_tree" %(args.bootstraps, args.min_freq, time.strftime("%Y%m%d%H%M%S"))
 	raxml_cline = RaxmlCommandline(raxml_prog, sequences = alignmentfile, algorithm = "a", model = "BINGAMMA", name = outname, parsimony_seed = args.seed, rapid_bootstrap_seed = args.seed, num_replicates = args.bootstraps, threads = nr_threads)
 	mylogger.info("-->" + str(raxml_cline))
 	raxml_cline()
@@ -573,9 +576,11 @@ def call_raxml_rapidbs(alignmentfile, outputfilename, seed, parameters): #parame
 	return outputfiles
 
 def call_raxml_bs(alignmentfile, outputfilename, seed, parameters):
-	mylogger.debug("call_raxmlbs(alignmentfile, %s, %s, %s)" % outputfilename, args.seed, parameters)
+	mylogger.debug("call_raxmlbs(alignmentfile, %s, %s, %s)" %(outputfilename, args.seed, parameters))
 	mylogger.info("Calculating phylogenies: Thorough bootstrap analyses with raxml")
-	
+	nr_threads=4
+	if "-T" in parameters:
+		nr_threads=parameters["-T"]
 	mylogger.info("\tDetermining best ML tree of 20 raxmlHPC runs")
 	#try:
 	raxml_cline = RaxmlCommandline(raxml_prog, model = "BINGAMMA", name = "best_delme_tempfile", parsimony_seed = args.seed, num_replicates = 20, sequences = alignmentfile, threads = nr_threads)
@@ -617,7 +622,7 @@ def call_raxml_bs(alignmentfile, outputfilename, seed, parameters):
 	return outputfiles
 
 def call_raxml_nobs(alignmentfile, outputfilename, seed, parameters):
-	mylogger.debug("call_raxml_nobs(alignmentfile, %s, %s, %s)" % outputfilename, args.seed, parameters)
+	mylogger.debug("call_raxml_nobs(alignmentfile, %s, %s, %s)" %(outputfilename, seed, parameters))
 	nr_threads=4
 	if "-T" in parameters:
 		nr_threads=parameters["-T"]
@@ -754,10 +759,10 @@ def main():
 		for delfile in os.listdir("."):
 			if "delme_tempfile" in delfile:
 				os.remove(delfile)
-		#for delfile in temp_tree_files:
-		#	os.remove(delfile)
-		#for delfile in temp_matrix_files:
-		#	os.remove(delfile)
+		for delfile in temp_tree_files:
+			os.remove(delfile)
+#		for delfile in temp_matrix_files:
+#			os.remove(delfile)
 		print "See " + logfilename + " for details\n"
 
 main()
