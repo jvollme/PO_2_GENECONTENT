@@ -10,7 +10,6 @@ However, This script is supposed to be part of a pipeline consisting of:
 2. Calculation of orthologs and paralogs using proteinortho5 (**with** the *'-single'* and *'-self'* arguments!)
 
 2. The creation of discrete binary character marices (and optionally phylogenetic trees) based on:
-    * the fasta sequences of step 1.)
     * the [proteinortho5][]-results from step 2.)
 
 ####usage: 
@@ -23,9 +22,18 @@ However, This script is supposed to be part of a pipeline consisting of:
 
 ####Dependancies:
 
+external tools:
  - [proteinortho5][]
- - [CDS_extractor.pl][]
- - [RaXML][]
+ - [CDS_extractor.pl][] (optional; necessary for completing pipeline with PO_2_MLSA.py and PO_2_ANNOTAION.py)
+ - [RaXML][] (optional; necessary for inferring maximum likelihood-based gene content trees) 
+ - [EMBOSS package] [] (optional; necessary for infering neighbor-joining-based gene content trees)
+
+NOTE: neighbor-joining-based tree inference was recently switched from biopython implemented methods to the external tool fneighbor (of the PHYLIP package implemented in the EMBOSS suite), because this was much faster for large datasets. This is, however, no longer compatible with all distance matrixes created with SciPy functions (when not using "-odiff none" or "-odiff simple").
+Will make this optional in future releases.
+
+python modules:
+ - [BioPython][] version 2.6.+
+ - [SciPy][] version 0.13.+ or higher (optional; necessary for distance matrix based inferrence of gene content trees)
  
 **optional arguments:**
 ````
@@ -81,5 +89,6 @@ However, This script is supposed to be part of a pipeline consisting of:
 [proteinortho5]: https://www.bioinf.uni-leipzig.de/Software/proteinortho/
 [CDS_extractor.pl]: https://github.com/aleimba/bac-genomics-scripts.git
 [raxml]: http://sco.h-its.org/exelixis/web/software/raxml/index.html
-
-
+[EMBOSS package]: http://emboss.sourceforge.net/
+[BioPython]: http://biopython.org/wiki/Main_Page
+[SciPy]: http://www.scipy.org/
