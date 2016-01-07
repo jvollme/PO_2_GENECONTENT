@@ -1,6 +1,6 @@
 #!/usr/bin/python
 #created 20.03.15 by John Vollmers
-#By switching to the use of the external tool Phylip for Distance-matrix based tree inference in the last commit, it is now impossible to use some alternative distance-matrix calculation methods implemented in scipy
+#By switching to the use of the external tool Phylip for Distance-matrix based tree inference in the last commit, it is now incompatible with some alternative distance-matrix calculation methods implemented in scipy
 #will make use of phylip distance matrix inference optional in future commits (Biopython and scipy implemented methods are to slow for very large genomes and large numbers of comparison genomes but are fine for small genomes and/or moderate numbers of comparison genomes
 
 import os, sys, logging, argparse, time, multiprocessing, random, traceback, Bio
@@ -31,7 +31,7 @@ myparser.add_argument("-tbp","--tree_builder_path", action="store", dest = "tree
 myparser.add_argument("-bs", "--bootstraps", action = "store", dest = "bootstraps", type = int, default = 1000, help = "Number of times to resample for bootstrapping\nonly bootstrapped trees will be produced, not the permutated data matrices")
 myparser.add_argument("--min_freq", action = "store", dest = "min_freq", type=int, default = 2, help = "Minimum frequency for Orthologeous Groups across all comparison-organisms\nfor Group to be considered in Analyses\nDefault=2 (exclude all singletons)\nRecommended when working with highly fragmented genomes or dubious ORF-finding")
 myparser.add_argument("--debug", action = "store_true", dest = "debug", default = False, help = "Log extra info for debugging")
-myparser.add_argument("--char_matrix", action = "store", dest = "charmatrix", default = None, help = "pre-calculated character matrix to use")
+#myparser.add_argument("--char_matrix", action = "store", dest = "charmatrix", default = None, help = "pre-calculated character matrix to use")
 #myparser.add_argument("--ignore_columns", action="store", dest="ignore_column_list", default=None, help="indexes (starting with 1) of Organisms to be ignored when counting frequencies of Orthologeous Groups (Tip: ignore all but one representative member of overrepresented species/strains)")
 args = myparser.parse_args()
 
