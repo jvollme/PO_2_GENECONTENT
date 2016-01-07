@@ -1,6 +1,7 @@
 #!/usr/bin/python
 #created 20.03.15 by John Vollmers
-#from Bio.Phylo.TreeConstruction import * #for using the directly biopython-implemented Distance(UPGMA + NJ) and parsimony methods. Not done/necessary yet
+#By switching to the use of the external tool Phylip for Distance-matrix based tree inference in the last commit, it is now impossible to use some alternative distance-matrix calculation methods implemented in scipy
+#will make use of phylip distance matrix inference optional in future commits (Biopython and scipy implemented methods are to slow for very large genomes and large numbers of comparison genomes but are fine for small genomes and/or moderate numbers of comparison genomes
 
 import os, sys, logging, argparse, time, multiprocessing, random, traceback, Bio
 from Bio import AlignIO, SeqIO
@@ -9,11 +10,14 @@ from Bio.Phylo.Applications import RaxmlCommandline, PhymlCommandline
 from Bio.Emboss.Applications import *
 from Bio import Phylo
 
-myparser=argparse.ArgumentParser(description="\n==PO_2_GENECONTENT.py v1.01 by John Vollmers==\nCreates discrete binary character matrices and phylogenetic trees based on the gene content (presence/absence of orthologues) in comparison organisms.\nThis script is supposed to be part of a pipeline consisting of:\n\
+version = "v0.8beta"
+
+myparser=argparse.ArgumentParser(description="\n==PO_2_GENECONTENT.py %s by John Vollmers==\nCreates discrete binary character matrices and phylogenetic trees based on the gene content (presence/absence of orthologues) in comparison organisms.\nThis script is supposed to be part of a pipeline consisting of:\n\
 \tA.)Conversion of Genbank/Embl-Files to ANNOTATED(!) Fastas\n\t   using CDS_extractor.pl by Andreas Leimbach\n\
 \tB.)Calculation of orthologs and paralogs using proteinortho5\n\t   (WITH the '-single' and '-self' arguments!)\n\
-\tC.)The creation of discrete binary character marices\n\t   (and optionally phylogenetic trees) based on:\n\t\t-the fasta sequences of step A\n\
-\t\t-the proteinortho5-results from step B\n", formatter_class=argparse.RawTextHelpFormatter)
+\tC.)The creation of discrete binary character marices\n\t   (and optionally phylogenetic trees) based on:n\
+\t\t-the proteinortho5-results from step B\n\
+\tThis script represents step C, and basically only needs proteinortho5-results as input\n" % version, formatter_class=argparse.RawTextHelpFormatter)
 myparser.add_argument("-po", "--proteinortho", action = "store", dest = "po_file", help = "(String) file with proteinortho5 results", required = True)
 myparser.add_argument("-s", "--silent", action = "store_true", dest = "no_verbose", help = "non-verbose mode")
 myparser.add_argument("-o", "--out", action = "store", dest="out_file", default = "output", help = "Basename for result-files\nDefault='output'\nWill create a phylip-file of the aligned discrete binary character data by default")
@@ -32,7 +36,6 @@ myparser.add_argument("--char_matrix", action = "store", dest = "charmatrix", de
 args = myparser.parse_args()
 
 #set global variables (in addition to args)
-version = "v0.8beta"
 OG_number = 0
 available_cores = multiprocessing.cpu_count() #counts how many cores are available, to check if the user-argument for cpus can be fulfilled
 timetag = time.strftime("%Y%m%d%H%M%S")
