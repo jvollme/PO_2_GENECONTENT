@@ -1,8 +1,8 @@
 ##PO_2_GENECONTENT.py
 
-Automizes the creation of discrete binary character matrices and phylogenetic trees based on the gene content (presence/absence of orthologues) in comparison organisms. Several Options for generating Distance matrices are available and can be automatically clustered (with or without bootstraps) using the neighbor-joining algorithm. If RAxML is installed, maximum likelyhood trees based (with or without bootstraps) on these character matrices can also be created automatically. Any trees that are generated will be output in the newick format.
+Automizes the creation of discrete binary character matrices and phylogenetic trees based on the gene content (presence/absence of orthologues) in comparison organisms. Several options for generating distance matrices are available and can be automatically clustered (with or without bootstraps) using the neighbor-joining algorithm. If RAxML is installed, maximum likelyhood trees based (with or without bootstraps) on these character matrices can also be created automatically. Any trees that are generated will be output in the newick format.
 
-This script only need a proteinortho result file as sole input. 
+This script only needs a proteinortho result file as sole input. 
 However, This script is supposed to be part of a pipeline consisting of:
 
 1. Conversion of Genbank/Embl-Files to **annotated**(!) Fastas using [CDS_extractor.pl][] by Andreas Leimbach
@@ -32,9 +32,10 @@ NOTE: neighbor-joining-based tree inference was recently switched from biopython
 Will make this optional in future releases.
 
 python modules:
- - [BioPython][] version 2.6.+
+ - [Python][] version 2.6.+
+ - [Biopython][] version 1.65 or higher
  - [SciPy][] version 0.13.+ or higher (optional; necessary for distance matrix based inferrence of gene content trees)
- 
+
 **optional arguments:**
 ````
   -h, --help            show this help message and exit
@@ -91,5 +92,6 @@ python modules:
 [CDS_extractor.pl]: https://github.com/aleimba/bac-genomics-scripts.git
 [raxml]: http://sco.h-its.org/exelixis/web/software/raxml/index.html
 [EMBOSS package]: http://emboss.sourceforge.net/
+[Python]:https://www.python.org/
 [BioPython]: http://biopython.org/wiki/Main_Page
 [SciPy]: http://www.scipy.org/
