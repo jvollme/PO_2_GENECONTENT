@@ -1,4 +1,4 @@
-#!/usr/bin/python
+#!/usr/bin/env python
 #created 20.03.15 by John Vollmers
 #By switching to the use of the external tool Phylip for Distance-matrix based tree inference in the last commit, it is now incompatible with some alternative distance-matrix calculation methods implemented in scipy
 #will make use of phylip distance matrix inference optional in future commits (Biopython and scipy implemented methods are to slow for very large genomes and large numbers of comparison genomes but are fine for small genomes and/or moderate numbers of comparison genomes
