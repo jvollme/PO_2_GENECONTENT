@@ -286,21 +286,21 @@ def write_binary_matrix(outname, columns, column_indices):
 
 
 #### replace
-def create_bootstrap_permutations(columns, method, headers, headerdict): #TODO create a simple genecontent-obj containing the binary-matrix, principal distance matrix-dict, header list and headerdict!! 
-	mylogger.info("creating %d bootstrap_permutations of binary character matrix (and corresponding distance matrix)" % args.bootstraps)
-	permutation_files = []
-	pcount = 0
-	while pcount < args.bootstraps:
-		pcount += 1
-		permutation_files.append(make_single_bootstrap_permutation(columns, method, headers, headerdict, pcount))
-		if not args.no_verbose:
-			sys.stdout.write("\rcreated Permutation %s of %s" %(len(permutation_files), args.bootstraps))
-			sys.stdout.flush()
-	if not args.no_verbose:
-		sys.stdout.write("\rcreated Permutation %s of %s\n" %(len(permutation_files), args.bootstraps))
-		sys.stdout.flush()
-	mylogger.info("finished creating permuted distance matrix files")
-	return permutation_files
+#~ def create_bootstrap_permutations(columns, method, headers, headerdict): #TODO create a simple genecontent-obj containing the binary-matrix, principal distance matrix-dict, header list and headerdict!! 
+	#~ mylogger.info("creating %d bootstrap_permutations of binary character matrix (and corresponding distance matrix)" % args.bootstraps)
+	#~ permutation_files = []
+	#~ pcount = 0
+	#~ while pcount < args.bootstraps:
+		#~ pcount += 1
+		#~ permutation_files.append(make_single_bootstrap_permutation(columns, method, headers, headerdict, pcount))
+		#~ if not args.no_verbose:
+			#~ sys.stdout.write("\rcreated Permutation %s of %s" %(len(permutation_files), args.bootstraps))
+			#~ sys.stdout.flush()
+	#~ if not args.no_verbose:
+		#~ sys.stdout.write("\rcreated Permutation %s of %s\n" %(len(permutation_files), args.bootstraps))
+		#~ sys.stdout.flush()
+	#~ mylogger.info("finished creating permuted distance matrix files")
+	#~ return permutation_files
 #	for mp_group in range(full_thread_mp_groups):
 #		permutation_tree_list.extend(run_multiprocess_group(columns, method, headers, args.ncpus))
 #		sys.stdout.write("\rcreated %d of %d bootstrap permutations" %(len(permutation_tree_list), args.bootstraps))
@@ -321,7 +321,7 @@ def get_nj_tree(columns, method, headers, headerdict, matrix_list):
 	ref_tree = Phylo.read(tree_file_list[0], "newick")
 	if len(tree_file_list) >= 1:
 		mylogger.info("inferring support values from bootstrap permutations")
-		permutation_tree_list = [ Phylo.read(t, "newick") for t in tree_file_list[1:0] ]
+		permutation_tree_list = [ Phylo.read(t, "newick") for t in tree_file_list[1:] ]
 		out_tree = calculate_bootstrapped_NJ_tree(ref_tree, permutation_tree_list)
 	else:
 		out_tree = ref_tree
@@ -332,12 +332,20 @@ def get_nj_tree(columns, method, headers, headerdict, matrix_list):
 def fix_tree(thistree, header_dict):
 	mylogger.debug("remove_internal_tree_labels(tree)")
 	mylogger.info("\nRemoving internal node labels that do nor refer to confidence values from final tree")
+	#~ print "*" * 100
+	#~ print "now:"
+	#~ print thistree
+	#~ print "*" *100
 	#remove internal node names (Only a problem of Bio.Phylo prior to version 1.69)
 	for inode in thistree.get_nonterminals(): #should be unneccessary in future biopython releases
 		inode.name = None #should be unneccessary in future biopython releases
 	#rename each leave back from phylip-style to original names
 	for onode in thistree.get_terminals():
 		onode.name = header_dict[onode.name]
+	#~ print "=" * 100
+	#~ print "after:"
+	#~ print thistree
+	#~ print "=" * 100
 	return thistree
 
 def organize_multiprocessing(columns, method, headers, headerdict, matrix_list): #TODO: check if headerdict actually used
@@ -450,11 +458,17 @@ def calculate_bootstrapped_NJ_tree(ref_tree, permutation_trees):
 	from Bio.Phylo.Consensus import get_support
 	
 	bs_tree = get_support(ref_tree, permutation_trees)
-	
+	#print len(permutation_trees)
+	#print "PRINTING CONFIDENCES AAAAAAAAAAAAARGH"
 	#in case some nodes are unsupported, phylo version >=1.7 will have support value "None". This should be changed to "0.00"  in case of bootstrapped trees
 	for inode in bs_tree.get_nonterminals(): #should be unnecessary in future biopython versions
+		#print inode.confidence
 		if inode.confidence == None: #should be unecessary in future biopython versions
+			#print inode.name
+			#print "CHAAAANGING TO ZEROOOOOO!"
 			inode.confidence = 0.0 #should be unecessary in future biopython versions
+	#print "DOOOONE"
+	print bs_tree.format("newick")
 	return bs_tree
 
 def calculate_matrix(columns, method):
@@ -850,8 +864,9 @@ def main():
 			for delfile in os.listdir("."):
 				if "delme_tempfile" in delfile or (delfile.startswith("temporary_permutationmatrix_NR") and "_{tt}.phylip".format(tt = timetag) in delfile):
 					os.remove(delfile)
-			for delfile in temp_tree_files:
-				os.remove(delfile)
+			#~ for delfile in temp_tree_files:
+				#~ print delfile
+				#~ os.remove(delfile)
 			for delfile in temp_matrix_files:
 				os.remove(delfile)
 			
