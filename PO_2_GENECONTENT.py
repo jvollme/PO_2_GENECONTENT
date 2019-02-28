@@ -10,7 +10,7 @@ from Bio.Phylo.Applications import RaxmlCommandline, PhymlCommandline
 from Bio.Emboss.Applications import *
 from Bio import Phylo
 
-version = "v0.8.1 (Feb. 2018)"
+version = "v0.8.2 (Feb. 2019)"
 
 myparser=argparse.ArgumentParser(description="\n==PO_2_GENECONTENT.py %s by John Vollmers==\nCreates discrete binary character matrices and phylogenetic trees based on the gene content (presence/absence of orthologues) in comparison organisms.\nThis script is supposed to be part of a pipeline consisting of:\n\
 \tA.)Conversion of Genbank/Embl-Files to ANNOTATED(!) Fastas\n\t   using CDS_extractor.pl by Andreas Leimbach\n\
@@ -260,59 +260,7 @@ def write_binary_matrix(outname, columns, column_indices):
 	outfile.close()
 	return outfile.name
 
-	
-#old version
-#def create_bootstrap_permutations(columns, method, headers):
-#	mylogger.info("creating %d bootstrap_permutations of binary character matrix (and corresponding bootstrap tree)\nusing %d cpus" %(args.bootstraps, args.ncpus))
-#	
-#	full_thread_mp_groups = args.bootstraps // args.ncpus
-#	remaining_mp_group_threads = args.bootstraps % args.ncpus
-#	maxlen = len(columns[0][1])
-#	permutation_tree_list = []
-#	bs_index = 0
-#	
-#	for mp_group in range(full_thread_mp_groups):
-#		permutation_tree_list.extend(run_multiprocess_group(columns, method, headers, args.ncpus))
-#		sys.stdout.write("\rcreated %d of %d bootstrap permutations" %(len(permutation_tree_list), args.bootstraps))
-#		sys.stdout.flush()
-#		
-	#finish off any remaining permutation jobs (in case the numbe of bootstraps was not evenly divisible by the number of cpus)
-#	if remaining_mp_group_threads > 0:
-#		permutation_tree_list.extend(run_multiprocess_group(columns, method, headers, remaining_mp_group_threads))
-#		sys.stdout.write("\rcreated %d of %d bootstrap permutations" %(len(permutation_tree_list), args.bootstraps))
-#		sys.stdout.flush()
-#		
-#	return permutation_tree_list
 
-
-#### replace
-#~ def create_bootstrap_permutations(columns, method, headers, headerdict): #TODO create a simple genecontent-obj containing the binary-matrix, principal distance matrix-dict, header list and headerdict!! 
-	#~ mylogger.info("creating %d bootstrap_permutations of binary character matrix (and corresponding distance matrix)" % args.bootstraps)
-	#~ permutation_files = []
-	#~ pcount = 0
-	#~ while pcount < args.bootstraps:
-		#~ pcount += 1
-		#~ permutation_files.append(make_single_bootstrap_permutation(columns, method, headers, headerdict, pcount))
-		#~ if not args.no_verbose:
-			#~ sys.stdout.write("\rcreated Permutation %s of %s" %(len(permutation_files), args.bootstraps))
-			#~ sys.stdout.flush()
-	#~ if not args.no_verbose:
-		#~ sys.stdout.write("\rcreated Permutation %s of %s\n" %(len(permutation_files), args.bootstraps))
-		#~ sys.stdout.flush()
-	#~ mylogger.info("finished creating permuted distance matrix files")
-	#~ return permutation_files
-#	for mp_group in range(full_thread_mp_groups):
-#		permutation_tree_list.extend(run_multiprocess_group(columns, method, headers, args.ncpus))
-#		sys.stdout.write("\rcreated %d of %d bootstrap permutations" %(len(permutation_tree_list), args.bootstraps))
-#		sys.stdout.flush()
-#		
-#	#finish off any remaining permutation jobs (in case the numbe of bootstraps was not evenly divisible by the number of cpus)
-#	if remaining_mp_group_threads > 0:
-#		permutation_tree_list.extend(run_multiprocess_group(columns, method, headers, remaining_mp_group_threads))
-#		sys.stdout.write("\rcreated %d of %d bootstrap permutations" %(len(permutation_tree_list), args.bootstraps))
-#		sys.stdout.flush()
-#		
-#	return permutation_tree_list
 def get_nj_tree(columns, method, headers, headerdict, matrix_list):
 	#first send jobs to queue
 	diff_matrix_list, tree_file_list = organize_multiprocessing(columns, method, headers, headerdict, matrix_list)
@@ -332,20 +280,12 @@ def get_nj_tree(columns, method, headers, headerdict, matrix_list):
 def fix_tree(thistree, header_dict):
 	mylogger.debug("remove_internal_tree_labels(tree)")
 	mylogger.info("\nRemoving internal node labels that do nor refer to confidence values from final tree")
-	#~ print "*" * 100
-	#~ print "now:"
-	#~ print thistree
-	#~ print "*" *100
 	#remove internal node names (Only a problem of Bio.Phylo prior to version 1.69)
 	for inode in thistree.get_nonterminals(): #should be unneccessary in future biopython releases
 		inode.name = None #should be unneccessary in future biopython releases
 	#rename each leave back from phylip-style to original names
 	for onode in thistree.get_terminals():
 		onode.name = header_dict[onode.name]
-	#~ print "=" * 100
-	#~ print "after:"
-	#~ print thistree
-	#~ print "=" * 100
 	return thistree
 
 def organize_multiprocessing(columns, method, headers, headerdict, matrix_list): #TODO: check if headerdict actually used
@@ -458,16 +398,10 @@ def calculate_bootstrapped_NJ_tree(ref_tree, permutation_trees):
 	from Bio.Phylo.Consensus import get_support
 	
 	bs_tree = get_support(ref_tree, permutation_trees)
-	#print len(permutation_trees)
-	#print "PRINTING CONFIDENCES AAAAAAAAAAAAARGH"
 	#in case some nodes are unsupported, phylo version >=1.7 will have support value "None". This should be changed to "0.00"  in case of bootstrapped trees
 	for inode in bs_tree.get_nonterminals(): #should be unnecessary in future biopython versions
-		#print inode.confidence
 		if inode.confidence == None: #should be unecessary in future biopython versions
-			#print inode.name
-			#print "CHAAAANGING TO ZEROOOOOO!"
 			inode.confidence = 0.0 #should be unecessary in future biopython versions
-	#print "DOOOONE"
 	print bs_tree.format("newick")
 	return bs_tree
 
@@ -735,7 +669,6 @@ def call_raxml_nobs(alignmentfile, outputfilename, seed, parameters):
 	print "deleting temporary files"
 	for delfile in os.listdir("."):
 		if delfile.startswith("RAxML_") and "." + outname + ".RUN." in delfile:
-			#print "deleting temp-file: "+delfile
 			os.remove(delfile)
 	#except Exception as e:
 	#	mylogger.info("\t-->FAILURE")
@@ -782,40 +715,7 @@ def main():
 			mylogger.info("\nGenerating distance matrices (setting = \"{diff}\") and trees (setting = \"{tree}\")".format(diff = args.outdiff, tree = args.tree_method))
 			matrix_list[0] = columns
 			nj_tree, temp_tree_files = get_nj_tree(columns, args.outdiff, headers, headerdict, matrix_list)
-			tree_files.append(nj_tree)
-		#if args.outdiff != "none": #TODO: if args.outdiff is "none" script will aparrently not create any trees? FIX THAT
-			###mylogger.info("\nGenerating similarity/distance matrices using %s" % args.outdiff) 
-			###if args.outdiff == "simple":
-			###	matrix_dict = calculate_sim_matrix_simple(columns)
-			###else:
-		###		matrix_dict = calculate_sim_matrix_professional(columns, args.outdiff)
-		###	headerdict = rename_phylipstile(headers)
-		###	base_matrix_files = write_sim_dif_matrix(headers, headerdict, out_file, matrix_dict, args.outdiff)
-		###	alignment_files.append(base_matrix_files[0])
-		###	temp_matrix_files.append(base_matrix_files[1])
-		###	
-		###	if args.tree_method in ["nj", "nj_bs"]:
-		###		if args.tree_method == "nj_bs" and args.bootstraps > 1:
-		###			mylogger.info("creating bootstrap permutations")
-		###			temp_matrix_files.extend(create_bootstrap_permutations(columns, args.outdiff, headers, headerdict))
-		###		mylogger.info("calulating trees")
-		###		temp_tree_files = calculate_phylip_NJ_trees(temp_matrix_files)
-		###		memory_tree_list = []
-		###		for treefile in temp_tree_files:
-		###			memory_tree_list.append(Phylo.read(treefile, "newick"))
-		###		main_tree = memory_tree_list.pop(0)
-		###		#print main_tree
-		###		if args.tree_method == "nj_bs" and args.bootstraps > 1:
-		###			main_tree = calculate_bootstrapped_NJ_tree(main_tree, memory_tree_list)
-			###	main_tree = rename_tree_leaves(main_tree, headerdict)
-			###	main_tree = remove_internal_tree_labels(main_tree) #remove internal node labels which are not confidence values
-			###	tree_files.append(write_nj_tree(out_file, args.outdiff, args.bootstraps, main_tree))
-			###	if not args.no_verbose:
-			###		print "\nascii representation of your NJ tree (not showing confidence values):\n"
-			###		Bio.Phylo.draw_ascii(main_tree)
-			###		print "plain text version of your NJ tree object (WITH confidence values) is included in the log file"
-			###	mylogger.info("\n" + "-" * 50 + "\nplain text version of your NJ tree (with confidence values):\n" + str(main_tree) + "\n" + "-" * 50)
-		
+			tree_files.append(nj_tree)		
 		if args.outmatrix:
 			alignment_files.append(write_binary_matrix(out_file, columns, column_indices))
 		alignment_files.append(write_binaryalignment_phylip(out_file, columns))
@@ -836,7 +736,6 @@ def main():
 	except IOError as e:
 		for frame in traceback.extract_tb(sys.exc_info()[2]):
 			fname,lineno,fn,text = frame
-			#print "Error in %s on line %d :> %text" % (fname, lineno, text)
 		mylogger.error("Error in %s on line %d :> %s" % (fname, lineno, text))
 		mylogger.error(str(e))
 		mylogger.error("One or more Inputfiles could not be found")
@@ -844,7 +743,6 @@ def main():
 	except OSError as e:
 		for frame in traceback.extract_tb(sys.exc_info()[2]):
 			fname,lineno,fn,text = frame
-			#print "Error in %s on line %d :> %text" % (fname, lineno, text)
 		mylogger.error("Error in %s on line %d :> %s" % (fname, lineno, text))
 		mylogger.error(str(e))
 		mylogger.error("One or more external dependancies for the specified workflow could not be found")
@@ -864,9 +762,7 @@ def main():
 			for delfile in os.listdir("."):
 				if "delme_tempfile" in delfile or (delfile.startswith("temporary_permutationmatrix_NR") and "_{tt}.phylip".format(tt = timetag) in delfile):
 					os.remove(delfile)
-			#~ for delfile in temp_tree_files:
-				#~ print delfile
-				#~ os.remove(delfile)
+
 			for delfile in temp_matrix_files:
 				os.remove(delfile)
 			
