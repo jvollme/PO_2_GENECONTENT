@@ -26,7 +26,7 @@ external tools:
  - [proteinortho5][]
  - [CDS_extractor.pl][] (optional; necessary for completing pipeline with PO_2_MLSA.py and PO_2_ANNOTAION.py)
  - [RaXML][] (optional; necessary for inferring maximum likelihood-based gene content trees) 
- - [EMBOSS package] [] (optional; necessary for infering neighbor-joining-based gene content trees)
+ - [EMBOSS package] [] (optional; necessary for infering neighbor-joining-based gene content trees (most noteworthy, the Embassy-phylip Package))
 
 NOTE: neighbor-joining-based tree inference was recently switched from biopython implemented methods to the external tool fneighbor (of the PHYLIP package implemented in the EMBOSS suite), because this was much faster for large datasets. This is, however, no longer compatible with all distance matrixes created with SciPy functions (when not using "-odiff none" or "-odiff simple").
 Will make this optional in future releases.
@@ -50,7 +50,7 @@ python modules:
                         (in addition to the default phylip file)
   -omat, --out_matrix   Create a file with the aligned discrete character data in tabular format
                         (in addition to the default phylip file)
-  -odiff {simple,none,braycurtis,canberra,cityblock,jaccard,euclidean}
+  -odiff {simple,braycurtis,canberra,cityblock,jaccard,euclidean}
                         Create difference/similarity matrixes for distance matrix based phylogeny inference.
                         	- simple : Simple normalized distance matrix
                         	  (distance=Nr shared OGs/total Nr OGs in SMALLER organism)
@@ -87,6 +87,7 @@ python modules:
                         Default=2 (exclude all singletons)
                         Recommended when working with highly fragmented genomes or dubious ORF-finding
   --debug               Log extra info for debugging
+  -kt, --keep_temp      Do not delete temporary files (Default: False)
 ````
 [proteinortho5]: https://www.bioinf.uni-leipzig.de/Software/proteinortho/
 [CDS_extractor.pl]: https://github.com/aleimba/bac-genomics-scripts.git
